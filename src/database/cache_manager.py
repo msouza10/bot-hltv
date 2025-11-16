@@ -13,9 +13,21 @@ import libsql_client
 
 logger = logging.getLogger(__name__)
 
+# Cache em memória para respostas rápidas
+_memory_cache = {
+    "upcoming": None,
+    "running": None,
+    "finished": None,
+    "stats": None,
+    "last_update": None
+}
+
 
 class MatchCacheManager:
     """Gerencia o cache de partidas no libSQL."""
+    
+    # Timeout para queries (3 segundos para não quebrar discord interactions)
+    QUERY_TIMEOUT = 3.0
     
     def __init__(self, db_url: str, auth_token: Optional[str] = None):
         """
@@ -116,6 +128,12 @@ class MatchCacheManager:
                     VALUES (?, ?, ?, 'success', CURRENT_TIMESTAMP)
                 """, [update_type, stats["updated"], stats["added"]])
                 
+                # Atualizar cache em memória para respostas rápidas
+                try:
+                    await self._update_memory_cache(client)
+                except Exception as e:
+                    logger.warning(f"⚠️ Erro ao atualizar cache em memória: {e}")
+                
                 return stats
                 
             except Exception as e:
@@ -132,7 +150,7 @@ class MatchCacheManager:
         Obtém partidas do cache.
         
         Args:
-            status: Filtrar por status (not_started, running, finished)
+            status: Filtrar por status (not_started, running, finished, ou 'results' para finished+canceled+postponed)
             hours: Últimas X horas
             limit: Limite de resultados
             
@@ -144,27 +162,49 @@ class MatchCacheManager:
             
             cutoff = (datetime.now() - timedelta(hours=hours)).isoformat()
             
-            if status:
-                result = await client.execute("""
-                    SELECT match_data
-                    FROM matches_cache
-                    WHERE status = ?
-                      AND updated_at >= ?
-                    ORDER BY begin_at ASC
-                    LIMIT ?
-                """, [status, cutoff, limit])
+            if status == "results":
+                # Para /resultados: incluir finished, canceled, postponed
+                query = await asyncio.wait_for(
+                    client.execute("""
+                        SELECT match_data
+                        FROM matches_cache
+                        WHERE status IN ('finished', 'canceled', 'postponed')
+                          AND updated_at >= ?
+                        ORDER BY begin_at DESC
+                        LIMIT ?
+                    """, [cutoff, limit]),
+                    timeout=self.QUERY_TIMEOUT
+                )
+            elif status:
+                query = await asyncio.wait_for(
+                    client.execute("""
+                        SELECT match_data
+                        FROM matches_cache
+                        WHERE status = ?
+                          AND updated_at >= ?
+                        ORDER BY begin_at ASC
+                        LIMIT ?
+                    """, [status, cutoff, limit]),
+                    timeout=self.QUERY_TIMEOUT
+                )
             else:
-                result = await client.execute("""
-                    SELECT match_data
-                    FROM matches_cache
-                    WHERE updated_at >= ?
-                    ORDER BY begin_at ASC
-                    LIMIT ?
-                """, [cutoff, limit])
+                query = await asyncio.wait_for(
+                    client.execute("""
+                        SELECT match_data
+                        FROM matches_cache
+                        WHERE updated_at >= ?
+                        ORDER BY begin_at ASC
+                        LIMIT ?
+                    """, [cutoff, limit]),
+                    timeout=self.QUERY_TIMEOUT
+                )
             
-            matches = [json.loads(row["match_data"]) for row in result.rows]
+            matches = [json.loads(row["match_data"]) for row in query.rows]
             return matches
             
+        except asyncio.TimeoutError:
+            logger.warning(f"⚠️ Timeout ao buscar partidas do cache (timeout={self.QUERY_TIMEOUT}s)")
+            return []
         except Exception as e:
             logger.error(f"✗ Erro ao obter matches do cache: {e}")
             return []
@@ -252,3 +292,75 @@ class MatchCacheManager:
         except Exception as e:
             logger.error(f"✗ Erro ao verificar cache: {e}")
             return True
+    
+    async def _update_memory_cache(self, client):
+        """Atualiza cache em memória com dados do banco para respostas rápidas."""
+        global _memory_cache
+        
+        try:
+            # Próximas partidas
+            result = await asyncio.wait_for(
+                client.execute("""
+                    SELECT match_data FROM matches_cache
+                    WHERE status = 'not_started'
+                    ORDER BY begin_at ASC LIMIT 50
+                """),
+                timeout=1.0
+            )
+            _memory_cache["upcoming"] = [
+                json.loads(row["match_data"]) for row in result.rows
+            ]
+            
+            # Partidas ao vivo
+            result = await asyncio.wait_for(
+                client.execute("""
+                    SELECT match_data FROM matches_cache
+                    WHERE status = 'running'
+                    ORDER BY begin_at DESC LIMIT 10
+                """),
+                timeout=1.0
+            )
+            _memory_cache["running"] = [
+                json.loads(row["match_data"]) for row in result.rows
+            ]
+            
+            # Resultados recentes (finished + canceled + postponed)
+            result = await asyncio.wait_for(
+                client.execute("""
+                    SELECT match_data FROM matches_cache
+                    WHERE status IN ('finished', 'canceled', 'postponed')
+                    ORDER BY begin_at DESC LIMIT 20
+                """),
+                timeout=1.0
+            )
+            _memory_cache["finished"] = [
+                json.loads(row["match_data"]) for row in result.rows
+            ]
+            
+            _memory_cache["last_update"] = datetime.now()
+            logger.debug("✓ Cache em memória atualizado")
+            
+        except asyncio.TimeoutError:
+            logger.warning("⚠️ Timeout ao atualizar cache em memória")
+        except Exception as e:
+            logger.error(f"✗ Erro ao atualizar cache em memória: {e}")
+    
+    async def get_cached_matches_fast(self, status: str, limit: int = 50) -> List[Dict]:
+        """
+        Obtém partidas do cache em memória (muito rápido!).
+        
+        Args:
+            status: 'upcoming', 'running', ou 'finished'
+            limit: Limite de resultados
+            
+        Returns:
+            Lista de partidas (pode estar vazia se nunca foi atualizado)
+        """
+        global _memory_cache
+        
+        if status == "not_started":
+            status = "upcoming"
+        
+        matches = _memory_cache.get(status) or []
+        return matches[:limit]
+

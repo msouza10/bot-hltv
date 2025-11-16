@@ -1,0 +1,58 @@
+# LIMPEZA VISUAL - IDS REMOVIDOS
+
+## Mudança Simples mas Importante
+
+Removi os IDs dos times que não eram necessários. Tornaram a interface mais limpa!
+
+### Antes ❌
+```
+🔗 Informações
+Counter-Strike | IDs: 137443 vs 127933
+```
+
+### Depois ✅
+```
+🔗 Informações
+Counter-Strike
+```
+
+---
+
+## Por Que?
+
+Os IDs:
+- Não são úteis para usuários finais
+- Ocupam espaço
+- Deixam visual poluído
+- Confundem
+
+---
+
+## Benefício
+
+✅ Interface **muito mais limpa**
+✅ Foco no **essencial** (nome do jogo)
+✅ Visual **profissional**
+
+---
+
+## Arquivo Modificado
+
+`src/utils/embeds.py`
+- Removidas 4 linhas desnecessárias
+- Mantido comentário para referência interna
+- IDs ainda estão no banco (não foram deletados)
+
+---
+
+## Status
+
+✅ Bot rodando com melhoria
+✅ Interface limpa
+✅ Pronto para Discord
+
+Teste: `/resultados 1 5`
+
+---
+
+Simples, mas melhora bastante a aparência! 🎨

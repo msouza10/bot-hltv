@@ -8,7 +8,7 @@ from nextcord import SlashOption
 import logging
 from typing import Optional
 
-from src.utils.embeds import create_match_embed, create_error_embed, create_info_embed
+from src.utils.embeds import create_match_embed, create_result_embed, create_error_embed, create_info_embed
 
 logger = logging.getLogger(__name__)
 
@@ -35,12 +35,25 @@ class MatchesCog(commands.Cog):
             required=False
         )
     ):
-        """Lista as próximas partidas de CS2."""
+        """Lista as próximas partidas de CS2 (do cache rápido)."""
         await interaction.response.defer()
         
         try:
-            # Buscar partidas da API
-            matches = await self.bot.api_client.get_upcoming_matches(per_page=quantidade)
+            # Primeiro: tentar cache em memória (muito rápido!)
+            matches = await self.bot.cache_manager.get_cached_matches_fast("upcoming", quantidade)
+            
+            # Se vazio: buscar do banco (mais lento)
+            if not matches:
+                logger.info("Cache em memória vazio, buscando do banco...")
+                matches = await self.bot.cache_manager.get_cached_matches(
+                    status="not_started",
+                    limit=quantidade
+                )
+            
+            # Última opção: API (só se tudo vazio)
+            if not matches:
+                logger.info("Cache vazio, buscando da API...")
+                matches = await self.bot.api_client.get_upcoming_matches(per_page=quantidade)
             
             if not matches:
                 embed = create_info_embed(
@@ -69,17 +82,17 @@ class MatchesCog(commands.Cog):
             
             # Enviar resposta
             await interaction.followup.send(
-                content=f"**📋 Próximas {len(embeds)} partidas de CS2:**",
+                content=f"**📋 Próximas {len(embeds)} partidas de CS2:** (cache atualizado)",
                 embeds=embeds[:10]  # Discord limita a 10 embeds por mensagem
             )
             
-            logger.info(f"✓ Comando /partidas executado por {interaction.user} ({quantidade} partidas)")
+            logger.info(f"✓ Comando /partidas executado por {interaction.user} ({quantidade} partidas do cache)")
             
         except Exception as e:
             logger.error(f"✗ Erro no comando /partidas: {e}")
             embed = create_error_embed(
                 "Erro ao buscar partidas",
-                f"Ocorreu um erro ao consultar a API: {str(e)}"
+                f"Ocorreu um erro ao consultar o cache: {str(e)}"
             )
             await interaction.followup.send(embed=embed)
     
@@ -88,11 +101,25 @@ class MatchesCog(commands.Cog):
         description="Mostra partidas de CS2 acontecendo agora"
     )
     async def aovivo(self, interaction: nextcord.Interaction):
-        """Lista partidas ao vivo."""
+        """Lista partidas ao vivo (do cache rápido)."""
         await interaction.response.defer()
         
         try:
-            matches = await self.bot.api_client.get_running_matches()
+            # Primeiro: tentar cache em memória (muito rápido!)
+            matches = await self.bot.cache_manager.get_cached_matches_fast("running", 10)
+            
+            # Se vazio: buscar do banco (mais lento)
+            if not matches:
+                logger.info("Cache em memória vazio, buscando do banco...")
+                matches = await self.bot.cache_manager.get_cached_matches(
+                    status="running",
+                    limit=10
+                )
+            
+            # Última opção: API
+            if not matches:
+                logger.info("Nenhuma partida ao vivo no cache, buscando da API...")
+                matches = await self.bot.api_client.get_running_matches()
             
             if not matches:
                 embed = create_info_embed(
@@ -112,7 +139,7 @@ class MatchesCog(commands.Cog):
             
             if embeds:
                 await interaction.followup.send(
-                    content=f"**🔴 {len(embeds)} partida(s) ao vivo:**",
+                    content=f"**🔴 {len(embeds)} partida(s) ao vivo:** (cache atualizado)",
                     embeds=embeds
                 )
             
@@ -150,14 +177,29 @@ class MatchesCog(commands.Cog):
             required=False
         )
     ):
-        """Lista resultados recentes."""
+        """Lista resultados recentes (do cache rápido)."""
         await interaction.response.defer()
         
         try:
-            matches = await self.bot.api_client.get_past_matches(
-                hours=horas,
-                per_page=quantidade
-            )
+            # Primeiro: tentar cache em memória (muito rápido!)
+            matches = await self.bot.cache_manager.get_cached_matches_fast("finished", quantidade)
+            
+            # Se vazio: buscar do banco (mais lento)
+            if not matches:
+                logger.info("Cache em memória vazio, buscando do banco...")
+                matches = await self.bot.cache_manager.get_cached_matches(
+                    status="results",  # Inclui finished, canceled, postponed
+                    hours=horas,
+                    limit=quantidade
+                )
+            
+            # Última opção: API
+            if not matches:
+                logger.info("Nenhum resultado no cache, buscando da API...")
+                matches = await self.bot.api_client.get_past_matches(
+                    hours=horas,
+                    per_page=quantidade
+                )
             
             if not matches:
                 embed = create_info_embed(
@@ -170,14 +212,15 @@ class MatchesCog(commands.Cog):
             embeds = []
             for match in matches[:quantidade]:
                 try:
-                    embed = create_match_embed(match)
+                    # Usar função otimizada para resultados
+                    embed = create_result_embed(match)
                     embeds.append(embed)
                 except Exception as e:
                     logger.error(f"Erro ao criar embed: {e}")
             
             if embeds:
                 await interaction.followup.send(
-                    content=f"**✅ Últimos {len(embeds)} resultado(s) ({horas}h):**",
+                    content=f"**✅ Últimos {len(embeds)} resultado(s) ({horas}h):** (cache atualizado)",
                     embeds=embeds
                 )
             

@@ -62,6 +62,24 @@ CREATE INDEX IF NOT EXISTS idx_notification_history_guild ON notification_histor
 CREATE INDEX IF NOT EXISTS idx_notification_history_match ON notification_history(match_id);
 CREATE INDEX IF NOT EXISTS idx_notification_history_sent_at ON notification_history(sent_at);
 
+-- Tabela para rastrear lembretes agendados de partidas
+CREATE TABLE IF NOT EXISTS match_reminders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    match_id INTEGER NOT NULL,
+    reminder_minutes_before INTEGER NOT NULL,  -- 60, 30, 15, 5, 0 (em tempo real)
+    scheduled_time DATETIME NOT NULL,           -- quando enviar o lembrete
+    sent BOOLEAN DEFAULT 0,                     -- se o lembrete foi enviado
+    sent_at DATETIME,
+    FOREIGN KEY (guild_id) REFERENCES guild_config(guild_id) ON DELETE CASCADE,
+    UNIQUE(guild_id, match_id, reminder_minutes_before)
+);
+
+CREATE INDEX IF NOT EXISTS idx_reminders_guild ON match_reminders(guild_id);
+CREATE INDEX IF NOT EXISTS idx_reminders_match ON match_reminders(match_id);
+CREATE INDEX IF NOT EXISTS idx_reminders_scheduled_time ON match_reminders(scheduled_time);
+CREATE INDEX IF NOT EXISTS idx_reminders_sent ON match_reminders(sent);
+
 -- Tabela de logs de atualização do cache
 CREATE TABLE IF NOT EXISTS cache_update_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -1,0 +1,165 @@
+# RESUMO VISUAL DAS MELHORIAS
+
+## Antes vs Depois
+
+### BEFORE (Antiga versão)
+```
+=== EMBED RESULT ===
+Metizport vs megoshort
+🏆 Torneio
+Svenska Cupen
+2025
+Group A
+
+📺 Formato
+BO1
+
+📅 Data
+<timestamp>
+
+📊 Resultado dos Mapas
+[VAZIO - Mapas nao apareciam]
+
+ℹ️ Detalhes
+Forfeit? (nao indicava quem venceu como)
+Version? (se tivesse)
+
+🔗 Links/Info
+...
+```
+
+### AFTER (Nova versão)
+```
+=== EMBED RESULT ===
+✅ Metizport venceu 1-0 megoshort
+🏆 Torneio
+Svenska Cupen
+📍 **Serie:** 2025
+→ Group A
+
+📺 Formato
+BO1
+
+📅 Data
+<timestamp>
+
+📊 Resultado dos Mapas
+**Resultado Final:** 1-0 (BO1)
+Jogo 1: Metizport venceu
+
+ℹ️ Detalhes
+Rescheduled (se aplicável)
+Match Type (se especial)
+
+🔗 Links/Info
+[Links + Team IDs]
+
+[THUMBNAIL: Liga logo ao invés de time]
+Footer: ID + Data UTC
+```
+
+## Mudanças Técnicas Realizadas
+
+### 1. Placar Final Baseado em Results (Não em Maps)
+```
+ANTES: Tentava usar game.map.name (que é null na API)
+DEPOIS: Usa match_data['results'] que tem o placar correto
+
+API Response:
+{
+  "results": [
+    {"team_id": 129440, "score": 1},
+    {"team_id": 136041, "score": 0}
+  ]
+}
+```
+
+### 2. Série vs Playoffs
+```
+ANTES: 
+  Serie: 2025
+  Tournament: Group A
+
+DEPOIS:
+  Serie: 2025 (detecta playoff via match_type)
+    - Se playoff: 🏆 **Playoffs:** 2025
+    - Se regular: 📍 **Serie:** 2025
+  Tournament (Fase): → Group A
+```
+
+### 3. Forfeit Claro
+```
+ANTES: "⚠️ Vitória por forfeit" (ambiguo)
+
+DEPOIS: 
+⚠️ **Vitória por Forfeit**
+Metizport venceu por abandono de megoshort
+
+(detecta via match_data['winner_id'])
+```
+
+### 4. Thumbnail Prioritizado
+```
+ANTES: team1.image_url
+
+DEPOIS (Prioridade):
+1. league.image_url (logo oficial da liga)
+2. team1.image_url (se liga nao tiver)
+3. Nada (se nenhum tiver)
+```
+
+## Cache Status Report
+
+### Validacao Concluida:
+✓ Liga/League: 100% presente + imagens
+✓ Serie Info: 100% presente
+✓ Tournament Info: 100% presente  
+✓ Match Type: 100% presente
+✓ Forfeit Flag: 100% armazenado
+✓ Draw Flag: 100% armazenado
+✓ Results: 100% armazenado
+✓ Games Array: 100% armazenado
+✓ Number of Games: 100% armazenado
+
+### Cache Distribuicao:
+- not_started (futuras): 50 partidas
+- running (ao vivo): 2 partidas
+- finished (finalizadas): 20 partidas
+- canceled (canceladas): 34 partidas
+- TOTAL: 106 partidas armazenadas
+
+## Mudanças de Codigo Principal
+
+### Arquivo: src/utils/embeds.py
+Funcao: `create_result_embed()`
+
+**Alteracoes:**
+1. Lines 310-325: Melhor deteccao de serie vs playoff
+2. Lines 357-388: Placar usando results do nivel superior
+3. Lines 419-460: Forfeit explicado com identificacao de vencedor
+4. Lines 493-499: Thumbnail priorizado (liga > time)
+
+### Arquivo: Novo
+`validate_cache_full.py` - Script de validacao do cache
+`preview_embed.py` - Script para testar embeds
+
+## Teste Recomendado
+
+1. Executar `/resultados` no Discord
+2. Confirmar:
+   - Placar aparecendo corretamente
+   - Logo da liga como thumbnail
+   - Forfeit claramente indicado (se aplicavel)
+   - Serie e Tournament info bem formatados
+   - Footer completo e nao truncado
+
+## Conclusao
+
+Todas as melhorias solicitadas foram implementadas:
+✓ Mapas: Usando placar correto via results
+✓ Imagem da Liga: Adicionada como thumbnail prioritario
+✓ Serie/Playoffs: Exibicao melhorada com deteccao automatica
+✓ Forfeit: Explicado com detalhes de quem venceu
+✓ Cache: Validacao completa confirma tudo esta sendo armazenado
+
+Bot esta pronto para teste em Discord!

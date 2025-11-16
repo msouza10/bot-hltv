@@ -13,16 +13,26 @@ import asyncio
 from src.services.pandascore_service import PandaScoreClient
 from src.database.cache_manager import MatchCacheManager
 from src.services.cache_scheduler import CacheScheduler
+from src.services.notification_manager import NotificationManager
 
-# Configurar logging
+# Configurar logging com suporte a UTF-8 em Windows e Linux
+import sys
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('logs/bot.log'),
-        logging.StreamHandler()
+        logging.FileHandler('logs/bot.log', encoding='utf-8'),
+        logging.StreamHandler(sys.stdout)
     ]
 )
+
+# Força UTF-8 no stdout/stderr para Windows
+if sys.platform == 'win32':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
 logger = logging.getLogger(__name__)
 
 # Carregar variáveis de ambiente
@@ -68,8 +78,11 @@ class HLTVBot(commands.Bot):
         # Inicializar gerenciador de cache (libSQL)
         self.cache_manager = MatchCacheManager(LIBSQL_URL, LIBSQL_AUTH_TOKEN)
         
-        # Inicializar agendador de cache
-        self.cache_scheduler = CacheScheduler(self.api_client, self.cache_manager)
+        # Inicializar gerenciador de notificações ANTES do scheduler
+        self.notification_manager = NotificationManager(self, self.cache_manager)
+        
+        # Inicializar agendador de cache com notification manager
+        self.cache_scheduler = CacheScheduler(self.api_client, self.cache_manager, self.notification_manager)
         
         logger.info("🤖 Bot HLTV inicializado")
         if default_guild_ids:
@@ -85,6 +98,7 @@ class HLTVBot(commands.Bot):
         cogs = [
             "src.cogs.ping",
             "src.cogs.matches",
+            "src.cogs.notifications",
         ]
         
         for cog in cogs:
@@ -124,6 +138,10 @@ class HLTVBot(commands.Bot):
         logger.info("⏰ Iniciando agendador de cache...")
         self.cache_scheduler.start()
         
+        # Iniciar gerenciador de notificações
+        logger.info("📬 Iniciando gerenciador de notificações...")
+        self.notification_manager.start_reminder_loop()
+        
         logger.info("✓ Bot pronto para uso!")
     
     async def on_guild_join(self, guild: nextcord.Guild):
@@ -154,6 +172,9 @@ class HLTVBot(commands.Bot):
         
         # Parar agendador
         self.cache_scheduler.stop()
+        
+        # Parar gerenciador de notificações
+        self.notification_manager.stop_reminder_loop()
         
         # Fechar cliente da API
         await self.api_client.close()

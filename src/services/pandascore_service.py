@@ -117,8 +117,27 @@ class PandaScoreClient:
         """
         # A API PandaScore retorna as partidas passadas ordenadas por data
         # Não precisa filtrar por data, ela já retorna as mais recentes
+        # IMPORTANTE: filtrar por status=finished para excluir canceladas
         params = {
+            "filter[status]": "finished",
             "sort": "-end_at",
+            "per_page": min(per_page, 100)
+        }
+        return await self._request("/csgo/matches/past", params)
+    
+    async def get_canceled_matches(self, per_page: int = 10) -> List[Dict]:
+        """
+        Busca partidas canceladas ou adiadas recentemente.
+        
+        Args:
+            per_page: Número de partidas a retornar
+            
+        Returns:
+            Lista de partidas canceladas/adiadas
+        """
+        params = {
+            "filter[status]": "canceled,postponed",
+            "sort": "-updated_at",
             "per_page": min(per_page, 100)
         }
         return await self._request("/csgo/matches/past", params)

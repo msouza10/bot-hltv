@@ -16,22 +16,24 @@ logger = logging.getLogger(__name__)
 class CacheScheduler:
     """Gerencia a atualização periódica do cache usando Discord Tasks."""
     
-    def __init__(self, api_client: PandaScoreClient, cache_manager: MatchCacheManager):
+    def __init__(self, api_client: PandaScoreClient, cache_manager: MatchCacheManager, notification_manager=None):
         """
         Inicializa o agendador.
         
         Args:
             api_client: Cliente da API PandaScore
             cache_manager: Gerenciador de cache
+            notification_manager: Gerenciador de notificações (opcional)
         """
         self.api_client = api_client
         self.cache_manager = cache_manager
+        self.notification_manager = notification_manager
         self.is_running = False
         
         logger.info("⏰ CacheScheduler inicializado (Discord Tasks)")
     
     async def update_all_matches(self):
-        """Atualiza todas as partidas (upcoming, running, past)."""
+        """Atualiza todas as partidas (upcoming, running, past e canceladas)."""
         try:
             logger.info("🔄 Iniciando atualização completa do cache...")
             
@@ -53,18 +55,43 @@ class CacheScheduler:
             except Exception as e:
                 logger.error(f"  ✗ Erro ao buscar partidas ao vivo: {e}")
             
-            # Buscar partidas passadas (últimas 24h)
+            # Buscar partidas passadas (finalizadas)
             try:
                 past = await self.api_client.get_past_matches(hours=24, per_page=20)
                 all_matches.extend(past)
-                logger.info(f"  ✓ {len(past)} partidas passadas obtidas")
+                logger.info(f"  ✓ {len(past)} partidas finalizadas obtidas")
             except Exception as e:
-                logger.error(f"  ✗ Erro ao buscar partidas passadas: {e}")
+                logger.error(f"  ✗ Erro ao buscar partidas finalizadas: {e}")
+            
+            # Buscar partidas canceladas/adiadas
+            try:
+                canceled = await self.api_client.get_canceled_matches(per_page=20)
+                all_matches.extend(canceled)
+                logger.info(f"  ✓ {len(canceled)} partidas canceladas/adiadas obtidas")
+            except Exception as e:
+                logger.error(f"  ✗ Erro ao buscar partidas canceladas/adiadas: {e}")
             
             # Cachear todas as partidas
             if all_matches:
                 stats = await self.cache_manager.cache_matches(all_matches, "all")
                 logger.info(f"✓ Cache atualizado: {stats['added']} novas, {stats['updated']} atualizadas")
+                
+                # Agendar lembretes para as novas partidas
+                if self.notification_manager and stats['added'] > 0:
+                    for match in all_matches:
+                        try:
+                            # Agendar para todos os servidores que têm notificações ativadas
+                            client = await self.cache_manager.get_client()
+                            result = await client.execute(
+                                "SELECT guild_id FROM guild_config WHERE notify_upcoming = 1 OR notify_live = 1"
+                            )
+                            
+                            if result.rows:
+                                for row in result.rows:
+                                    guild_id = row[0]
+                                    await self.notification_manager.setup_reminders_for_match(guild_id, match)
+                        except Exception as e:
+                            logger.error(f"Erro ao agendar lembretes: {e}")
             else:
                 logger.warning("⚠️ Nenhuma partida obtida da API")
             
