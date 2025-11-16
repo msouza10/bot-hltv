@@ -3,14 +3,23 @@
 [Unit]
 Description=Bot Service
 After=network.target
-StartLimitIntervalSec=0
+
 [Service]
 Type=simple
-Restart=always
-RestartSec=10
-User=root
+User=bot
+
+WorkingDirectory=/root/code/bot-hltv
 ExecStart=/root/code/bot-hltv/venv/bin/python -m src.bot
+
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=0
+
+# Segurança mínima
+Environment=PYTHONUNBUFFERED=1
+
 [Install]
 WantedBy=multi-user.target
+
 
 # colocar este ficheiro em /etc/systemd/system/bot.service
