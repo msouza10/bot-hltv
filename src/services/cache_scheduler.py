@@ -9,6 +9,7 @@ from nextcord.ext import tasks
 
 from src.services.pandascore_service import PandaScoreClient
 from src.database.cache_manager import MatchCacheManager
+from src.database.temporal_cache import cleanup_expired_cache, ensure_temporal_coverage
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +136,31 @@ class CacheScheduler:
                 deleted = await self.cache_manager.clean_old_cache(hours=24)
                 if deleted > 0:
                     logger.info(f"🗑️ {deleted} partidas antigas removidas")
+                
+                # 🕐 NOVA: Limpeza temporal (manter exatamente 42 horas)
+                logger.info("🕐 Executando limpeza temporal (42h)...")
+                try:
+                    client = await self.cache_manager.get_client()
+                    cleanup_stats = await cleanup_expired_cache(client)
+                    logger.info(f"   ✅ Limpeza temporal concluída")
+                except Exception as e:
+                    logger.error(f"   ✗ Erro na limpeza temporal: {e}")
+                
+                # 🕐 NOVA: Garantir cobertura de 42 horas
+                logger.info("🕐 Garantindo cobertura temporal de 42 horas...")
+                try:
+                    client = await self.cache_manager.get_client()
+                    coverage_stats = await ensure_temporal_coverage(
+                        client,
+                        self.api_client,
+                        minimum_hours=42
+                    )
+                    logger.info(f"   📊 Cobertura: {coverage_stats['current_coverage_hours']}h - "
+                               f"Status: {coverage_stats['coverage_status']}")
+                    if coverage_stats['matches_added'] > 0:
+                        logger.info(f"   ✅ {coverage_stats['matches_added']} novas partidas adicionadas")
+                except Exception as e:
+                    logger.error(f"   ✗ Erro ao garantir cobertura: {e}")
                 
                 # Mostrar estatísticas
                 stats = await self.cache_manager.get_cache_stats()
