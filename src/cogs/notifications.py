@@ -77,7 +77,11 @@ class NotificationsCog(commands.Cog):
                 # Agendar lembretes para todas as partidas no cache
                 matches = await self.bot.cache_manager.get_cached_matches_fast(guild_id)
                 
+                logger.info(f"📋 Comando /notificacoes ativar:true em guild {guild_id}")
+                logger.info(f"   📊 Total de partidas em cache: {len(matches) if matches else 0}")
+                
                 if matches:
+                    logger.info(f"   🚀 Iniciando agendamento de lembretes...")
                     scheduled_count = await self.bot.notification_manager.setup_reminders_for_all_matches(
                         guild_id, 
                         matches
@@ -87,13 +91,14 @@ class NotificationsCog(commands.Cog):
                         value="Lembretes em: 1h, 30min, 15min, 5min e ao vivo",
                         inline=False
                     )
-                    logger.info(f"✓ {scheduled_count} lembretes agendados para guild {guild_id}")
+                    logger.info(f"   ✅ Agendamento concluído! {scheduled_count} partidas configuradas")
                 else:
                     embed.add_field(
                         name="📬 Nenhuma partida no cache",
                         value="Lembretes serão criados automaticamente quando partidas forem adicionadas",
                         inline=False
                     )
+                    logger.warning(f"   ⚠️ Nenhuma partida em cache para agendar")
                 
                 embed.add_field(
                     name="⚠️ Aviso",

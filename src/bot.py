@@ -114,17 +114,16 @@ class HLTVBot(commands.Bot):
     
     async def on_ready(self):
         """Evento chamado quando o bot conecta ao Discord."""
-        logger.info("=" * 50)
-        logger.info(f"✓ Bot conectado como: {self.user.name} (ID: {self.user.id})")
-        logger.info(f"✓ Conectado a {len(self.guilds)} servidor(es)")
-        logger.info(f"✓ Ping: {round(self.latency * 1000)}ms")
-        logger.info("=" * 50)
+        logger.info("=" * 60)
+        logger.info(f"✅ BOT CONECTADO como: {self.user.name} (ID: {self.user.id})")
+        logger.info(f"   Servidores: {len(self.guilds)} | Ping: {round(self.latency * 1000)}ms")
+        logger.info("=" * 60)
         
         # Listar servidores
         if self.guilds:
-            logger.info("📋 Servidores conectados:")
+            logger.info("📋 SERVIDORES CONECTADOS:")
             for guild in self.guilds:
-                logger.info(f"  • {guild.name} (ID: {guild.id})")
+                logger.info(f"   • {guild.name} (ID: {guild.id})")
         
         # Definir status
         await self.change_presence(
@@ -133,16 +132,23 @@ class HLTVBot(commands.Bot):
                 name="partidas de CS2"
             )
         )
+        logger.info("🎮 Status: Assistindo partidas de CS2")
         
         # Iniciar agendador de cache
+        logger.info("\n[CACHE SCHEDULER]")
         logger.info("⏰ Iniciando agendador de cache...")
         self.cache_scheduler.start()
+        logger.info("✅ Agendador de cache ATIVO")
         
         # Iniciar gerenciador de notificações
+        logger.info("\n[NOTIFICATION MANAGER]")
         logger.info("📬 Iniciando gerenciador de notificações...")
         self.notification_manager.start_reminder_loop()
+        logger.info("✅ Gerenciador de notificações ATIVO")
         
-        logger.info("✓ Bot pronto para uso!")
+        logger.info("\n" + "=" * 60)
+        logger.info("🚀 BOT PRONTO PARA USO")
+        logger.info("=" * 60 + "\n")
     
     async def on_guild_join(self, guild: nextcord.Guild):
         """Evento chamado quando o bot entra em um servidor."""
