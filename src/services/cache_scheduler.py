@@ -390,17 +390,106 @@ class CacheScheduler:
                 except Exception as e:
                     logger.error(f"✗ Erro ao liberar recursos: {e}")
     
-    # Task: Atualização completa a cada 15 minutos
-    @tasks.loop(minutes=15, count=None)
+    async def check_running_to_finished_transitions_fast(self):
+        """
+        Verificação RÁPIDA e otimizada para partidas que mudaram de running → finished.
+        Executa a cada 1 minuto com mínimo overhead.
+        
+        OTIMIZAÇÕES:
+        - Sem chamada à API (apenas consulta BD)
+        - Query direta: running no cache SEM update recente = possível finished
+        - Se encontrar suspeita, faz UMA busca final no BD
+        - Muito mais leve que check_running_to_finished_transitions()
+        """
+        try:
+            logger.info("🔍 Verificação rápida de resultados (cache apenas)...")
+            
+            client = await self.cache_manager.get_client()
+            
+            # Buscar partidas em cache com status 'running' e sem atualização recente (>1min)
+            # Essas podem ter terminado
+            result = await client.execute("""
+                SELECT match_id, match_data, updated_at
+                FROM matches_cache
+                WHERE status = 'running'
+                AND datetime(updated_at) < datetime('now', '-1 minute')
+                AND updated_at > datetime('now', '-7 days')
+                LIMIT 20
+            """)
+            
+            suspect_running = result.rows if result.rows else []
+            
+            if not suspect_running:
+                logger.debug("   ✅ Nenhuma partida suspeita em running")
+                return
+            
+            logger.info(f"   ⚠️ {len(suspect_running)} partida(s) em running sem atualização recente")
+            
+            # Se temos suspeitas, buscar lista de finished atual
+            try:
+                finished_matches = await self.api_client.get_past_matches(hours=2, per_page=50)
+                finished_ids = {m.get('id'): m for m in finished_matches}
+                logger.info(f"   📊 Checando contra {len(finished_ids)} partidas finished")
+            except Exception as e:
+                logger.error(f"   ✗ Erro ao buscar finished: {e}")
+                return
+            
+            # Comparar
+            transitioned = []
+            for match_id, match_data, updated_at in suspect_running:
+                if match_id in finished_ids:
+                    finished_match = finished_ids[match_id]
+                    transitioned.append((match_id, finished_match))
+                    logger.warning(f"   🔥 TRANSIÇÃO RÁPIDA DETECTADA: Match {match_id}")
+                    logger.warning(f"      Status agora: {finished_match.get('status')}")
+            
+            if not transitioned:
+                logger.info("   ✅ Nenhuma transição confirmada")
+                return
+            
+            logger.warning(f"🎯 {len(transitioned)} transição(ões) confirmada(s)!")
+            
+            # Atualizar cache e agendar notificações
+            for match_id, finished_match in transitioned:
+                # Atualizar cache
+                await self.cache_manager.cache_matches([finished_match], "fast_check")
+                logger.info(f"   ✅ Cache atualizado: {match_id}")
+                
+                # Agendar notificação de resultado para TODOS os guilds
+                if self.notification_manager:
+                    try:
+                        client = await self.cache_manager.get_client()
+                        result = await client.execute(
+                            "SELECT guild_id FROM guild_config WHERE notify_results = 1"
+                        )
+                        
+                        if result.rows:
+                            for row in result.rows:
+                                guild_id = row[0]
+                                await self.notification_manager.schedule_result_notification(
+                                    guild_id,
+                                    match_id
+                                )
+                                logger.info(f"      📬 Notificação agendada para guild {guild_id}")
+                    except Exception as e:
+                        logger.error(f"      ✗ Erro ao agendar notificação: {e}")
+        
+        except Exception as e:
+            logger.error(f"✗ Erro na verificação rápida: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    # Task: Atualização completa a cada 3 minutos (otimizado)
+    @tasks.loop(minutes=3, count=None)
     async def update_all_task(self):
         """Task do Discord para atualização completa."""
         await self.update_all_matches()
     
-    # Task: Atualização de partidas ao vivo a cada 5 minutos
-    @tasks.loop(minutes=5, count=None)
-    async def update_live_task(self):
-        """Task do Discord para atualização de partidas ao vivo."""
-        await self.update_live_matches()
+    # Task: Verificação rápida de resultados a cada 1 minuto
+    @tasks.loop(minutes=1, count=None)
+    async def check_finished_task(self):
+        """Task para detecção rápida de partidas finalizadas."""
+        await self.check_running_to_finished_transitions_fast()
     
     @update_all_task.before_loop
     async def before_update_all(self):
@@ -408,8 +497,8 @@ class CacheScheduler:
         logger.info("⏳ Aguardando bot ficar pronto...")
         await asyncio.sleep(2)  # Pequeno delay para garantir que tudo está inicializado
     
-    @update_live_task.before_loop
-    async def before_update_live(self):
+    @check_finished_task.before_loop
+    async def before_check_finished(self):
         """Aguarda o bot estar pronto antes de iniciar a task."""
         await asyncio.sleep(2)
     
@@ -421,13 +510,13 @@ class CacheScheduler:
         
         # Iniciar ambas as tasks
         self.update_all_task.start()
-        self.update_live_task.start()
+        self.check_finished_task.start()
         
         self.is_running = True
         
         logger.info("✓ Agendador iniciado com Discord Tasks!")
-        logger.info("  • Atualização completa: a cada 15 minutos")
-        logger.info("  • Partidas ao vivo: a cada 5 minutos")
+        logger.info("  • Atualização completa: a cada 3 minutos")
+        logger.info("  • Verificação de resultados: a cada 1 minuto")
         logger.info("  • Primeira execução: em 2 segundos")
     
     def stop(self):
@@ -438,7 +527,7 @@ class CacheScheduler:
         
         # Parar tasks do Discord
         self.update_all_task.cancel()
-        self.update_live_task.cancel()
+        self.check_finished_task.cancel()
         
         self.is_running = False
         logger.info("✓ Agendador parado")
@@ -448,13 +537,13 @@ class CacheScheduler:
         Retorna próxima execução de uma task.
         
         Args:
-            task_name: Nome da task (update_all ou update_live)
+            task_name: Nome da task (update_all ou check_finished)
             
         Returns:
             String com data/hora da próxima execução
         """
         if task_name == "update_all" and self.update_all_task.next_iteration:
             return self.update_all_task.next_iteration.strftime("%Y-%m-%d %H:%M:%S")
-        elif task_name == "update_live" and self.update_live_task.next_iteration:
-            return self.update_live_task.next_iteration.strftime("%Y-%m-%d %H:%M:%S")
+        elif task_name == "check_finished" and self.check_finished_task.next_iteration:
+            return self.check_finished_task.next_iteration.strftime("%Y-%m-%d %H:%M:%S")
         return "N/A"

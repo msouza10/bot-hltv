@@ -1,0 +1,352 @@
+# AI Agent Instructions for bot-hltv
+
+**Project**: Discord bot for CS2 (Counter-Strike 2) match notifications via PandaScore API  
+**Stack**: Python 3.10+, Nextcord, libSQL (Turso), APScheduler  
+**Status**: Production-ready MVP with 24h/1h/live/result notifications
+
+## Architecture Overview
+
+### High-Level Data Flow
+
+```
+PandaScore API → pandascore_service.py → cache_scheduler.py → 
+  ↓
+libSQL Cache (3-tier: memory → DB → API fallback) → embeds.py → 
+  ↓
+NotificationManager (reminder scheduling) → Discord Guild Channels
+```
+
+**Key insight**: The system uses hierarchical caching to minimize API calls while keeping Discord interactions fast (<3s timeout).
+
+### Core Components
+
+1. **bot.py**: Entry point. Initializes PandaScoreClient, MatchCacheManager, CacheScheduler, and NotificationManager in sequence. Loads cogs dynamically.
+
+2. **pandascore_service.py**: Async HTTP client wrapping CS2 endpoints (`/upcoming`, `/running`, `/past?filter=finished`, `/past?filter=canceled`). Handles rate limiting (1000 req/h) and connection pooling.
+
+3. **cache_scheduler.py**: Discord Tasks-based scheduler running two async loops:
+   - `update_all_matches()`: Every 15 min (fetches 50 upcoming + 2 running + 20 finished)
+   - `update_live_matches()`: Every 5 min (only running matches)
+
+4. **cache_manager.py**: libSQL operations with async lock for race condition prevention. Memory cache stores recent results separately (`_memory_cache` dict).
+
+5. **notification_manager.py**: Schedules reminders at [60, 30, 15, 5, 0] minutes before match start. Uses `match_reminders` table to track state and avoid duplicates.
+
+6. **cogs/{matches, notifications, ping}.py**: Slash commands (`/partidas`, `/aovivo`, `/resultados`, `/notificacoes`).
+
+### Database Schema
+
+**Critical tables**:
+- `matches_cache`: Match data as JSON with status (not_started/running/finished), indexed by `begin_at` and `status`
+- `match_reminders`: Reminder scheduling (guild_id, match_id, minutes_before, scheduled_time, sent flag)
+- `guild_config`: Per-guild notification settings with `notification_channel_id`
+- `guild_favorite_teams`: Team filtering by guild
+- `notification_history`: Deduplication using (guild_id, match_id, notification_type) UNIQUE constraint
+
+## Developer Workflows
+
+### Running the Bot
+```bash
+source venv/bin/activate
+python -m src.bot
+```
+
+### Database Setup
+```bash
+python -m src.database.build_db  # Creates/resets schema
+```
+
+### Debugging
+- Check logs in `logs/bot.log` (auto-created with UTF-8)
+- Use scripts in `scripts/check_*.py` for API/cache inspection
+- `scripts/monitor_reminders_realtime.py` for notification flow tracing
+
+### Adding New Features
+1. If it's a slash command: Create in `src/cogs/` with Nextcord decorators (`@nextcord.slash_command`)
+2. If it accesses cache: Use `self.bot.cache_manager` (await-based async)
+3. If it needs scheduling: Add task to `CacheScheduler` using `@tasks.loop()`
+4. Always handle `asyncio.TimeoutError` and db connection failures gracefully
+
+## Project-Specific Conventions
+
+### Async Patterns
+- **Never block**: All I/O uses `async`/`await`. Use `asyncio.Lock()` for shared state.
+- **Timeout enforcement**: `MatchCacheManager.QUERY_TIMEOUT = 3.0` prevents Discord interaction timeouts. Always wrap DB calls in try/except.
+- **Session pooling**: `pandascore_service.py` reuses single `aiohttp.ClientSession` (lazily created in `_get_session()`).
+
+### Logging
+- Use `logging.getLogger(__name__)` in every module
+- Log format: `%(asctime)s - %(name)s - %(levelname)s - %(message)s`
+- UTF-8 encoding hardcoded for Windows compatibility (see `bot.py` line 31-33)
+- Include emoji prefixes for clarity: ✅ success, ✗ error, ⏰ scheduled, 📅 time-related, etc.
+
+### Cache Hierarchy (Critical Pattern)
+1. **Memory cache** (`_memory_cache` dict): <100ms, holds recent results
+2. **libSQL DB**: <3s, persistent across restarts
+3. **API fallback**: If cache fails, fetch live (expensive, avoid in hot paths)
+
+Example in `matches.py`:
+```python
+matches = await self.bot.cache_manager.get_cached_matches_fast("upcoming", 5)
+if not matches:  # Fallback to DB
+    matches = await self.bot.cache_manager.get_cached_matches("not_started", 5)
+```
+
+### Error Handling Conventions
+- HTTP errors from API: Log, return empty list (graceful degradation)
+- DB connection errors: Respect `QUERY_TIMEOUT`, retry if transient
+- Invalid match data: Skip silently (don't crash scheduler)
+- Discord interaction failures: Acknowledge with error embed using `create_error_embed()`
+
+### Embed Formatting
+All embeds use `src/utils/embeds.py` functions:
+- `create_match_embed()`: For upcoming/running (blue ⏰ / red 🔴)
+- `create_result_embed()`: For finished/canceled (green ✅)
+- `create_error_embed()`: For failures
+- Colors mapped in `color_map` dict; status emoji in `status_emoji` dict
+
+### Notification Deduplication
+Prevent spam via `notification_history` table:
+```python
+UNIQUE(guild_id, match_id, notification_type)  # Enforced in schema.sql
+```
+Always check `notification_history` before sending; mark sent in `match_reminders.sent_at`.
+
+## Integration Points & External Dependencies
+
+### PandaScore API
+- Base URL: `https://api.pandascore.co`
+- Auth: Bearer token in header
+- Rate limit: 1000 requests/hour
+- Key endpoints:
+  - `GET /csgo/matches/upcoming` (50 per_page default)
+  - `GET /csgo/matches/running` (no pagination needed)
+  - `GET /csgo/matches/past?filter[status]=finished`
+  - `GET /csgo/matches/past?filter[status]=canceled`
+
+### Discord via Nextcord
+- Slash command registration: Use `@nextcord.slash_command(name="...", description="...")` decorator
+- Interactions must defer with `await interaction.response.defer()` if >3s processing expected
+- Use `nextcord.Intents.default()` with `guilds=True` and `guild_messages=True`
+- Set `default_guild_ids` to TESTING_GUILD_ID for instant command propagation (vs 1h global)
+
+### libSQL (Turso)
+- Connection: `libsql_client.create_client(url=db_url, auth_token=auth_token)`
+- Local dev: `file:./data/bot.db`
+- Remote prod: `libsql://...` with auth_token
+- Always use connection pooling; call `client.execute()` for queries
+
+### Environment Variables (`.env`)
+```
+DISCORD_TOKEN=<bot_token>
+PANDASCORE_API_KEY=<api_key>
+TESTING_GUILD_ID=<guild_id>  # For instant command registration
+LIBSQL_URL=file:./data/bot.db  # Or libsql://... for Turso
+LIBSQL_AUTH_TOKEN=<optional_auth>  # Only for remote DB
+```
+
+## Common Pitfalls & Solutions
+
+| Issue | Solution |
+|-------|----------|
+| Slash commands don't appear for 1h | Set `TESTING_GUILD_ID` for instant propagation |
+| `asyncio.TimeoutError` on interaction | Check if DB query exceeds `QUERY_TIMEOUT` (3s); use memory cache first |
+| Duplicate notifications sent | Always check `notification_history` BEFORE sending; race conditions need `asyncio.Lock()` |
+| API rate limit hit | Backoff with exponential delay; cache handles this—don't retry immediately |
+| Match data incomplete (null fields) | Check PandaScore API response; skip invalid matches in cache logic |
+| UTF-8 encoding errors on Windows | Already fixed in `bot.py` (lines 31-33); don't remove |
+
+## Directory Organization Map
+
+**CRITICAL**: Always respect this hierarchy. Create new files ONLY in their designated directories.
+
+### `/src/` - Production Code (Core Application)
+```
+src/
+├── bot.py                              # Bot initialization & lifecycle (never move)
+├── cogs/                               # Discord slash commands
+│   ├── __init__.py
+│   ├── matches.py                      # /partidas, /aovivo, /resultados commands
+│   ├── notifications.py                # /notificacoes, /canal-notificacoes commands
+│   └── ping.py                         # /ping health check
+├── database/                           # Persistence layer
+│   ├── __init__.py
+│   ├── build_db.py                     # Database initialization
+│   ├── cache_manager.py                # libSQL cache operations
+│   ├── schema.sql                      # Database schema (never edit manually)
+│   └── debug_cache.py                  # Cache debugging utilities
+├── services/                           # Business logic & integrations
+│   ├── __init__.py
+│   ├── pandascore_service.py           # PandaScore API client
+│   ├── cache_scheduler.py              # Background task scheduling
+│   └── notification_manager.py         # Reminder & notification scheduling
+└── utils/                              # Shared utilities
+    ├── __init__.py
+    └── embeds.py                       # Discord embed formatting functions
+```
+
+**Rules**:
+- ✅ Add slash commands: `/src/cogs/new_feature.py`
+- ✅ Add API integrations: `/src/services/new_service.py`
+- ✅ Add utilities: `/src/utils/new_utility.py`
+- ✅ Add database tables: Modify `/src/database/schema.sql`, then run `build_db.py`
+- ❌ NEVER create production files outside `src/`
+
+### `/scripts/` - Development & Testing Scripts
+```
+scripts/
+├── README.md                           # Scripts documentation
+├── check_*.py                          # API/cache verification scripts
+│   ├── check_api_status_filter.py      # Validate PandaScore API responses
+│   ├── check_api_structure.py          # Inspect API data structure
+│   ├── check_cache_content.py          # Dump current cache state
+│   ├── check_reminders_detailed.py     # Inspect reminder scheduling
+│   └── check_status.py                 # Overall system health
+├── analyze_*.py                        # Data analysis scripts
+│   ├── analyze_match_status.py         # Match status distribution
+│   ├── debug_api_structure.py          # Deep API inspection
+│   └── debug_match_*.py                # Match-specific debugging
+├── init_db.py                          # Quick database initialization
+├── monitor_reminders_realtime.py       # Real-time reminder flow tracing
+├── preview_embed.py                    # Preview Discord embed rendering
+├── test_*.py                           # Feature tests
+│   └── test_reminder_now.py            # Test reminder scheduling immediately
+└── fix_*.py                            # Data repair scripts
+    ├── fix_stuck_matches.py            # Unstuck matches in wrong status
+    ├── clean_old_reminders.py          # Remove expired reminders
+    └── run_scheduling_status.py        # Check scheduler status
+```
+
+**Rules**:
+- ✅ Create debug/analysis scripts: `/scripts/analyze_*.py` or `/scripts/debug_*.py`
+- ✅ Create test utilities: `/scripts/test_*.py`
+- ✅ Create data repair scripts: `/scripts/fix_*.py` or `/scripts/clean_*.py`
+- ✅ Create monitoring tools: `/scripts/monitor_*.py`
+- ✅ Create verification tools: `/scripts/check_*.py`
+- ❌ NEVER put production code in scripts/
+- ⚠️ Keep scripts independent (can run standalone without bot running)
+
+### `/docs/` - Documentation & Design Docs
+```
+docs/
+├── README.md                           # Documentation index
+├── COMECE_AQUI.md                      # Quick start guide (português)
+├── ARQUITETURA_*.md                    # Architecture & design decisions
+│   ├── ARQUITETURA_FINAL.md            # Complete data flow diagram
+│   ├── ARQUITETURA_CACHE.md            # Cache hierarchy explanation
+│   └── FLUXO_CACHE_EXPLICADO.md        # Cache flow walkthrough
+├── GUIA_*.md                           # Usage guides
+│   ├── GUIA_RAPIDO.md                  # Quick reference
+│   ├── GUIA_STATUS_PARTIDA.md          # Match status states
+│   ├── GUIA_TESTE_FINAL.md             # Testing guide
+│   └── GUIA_THUMBNAIL_MELHORADO.md     # UI/UX improvements
+├── MELHORIAS_*.md                      # Feature documentation
+│   ├── MELHORIAS_CACHE_EMBEDS_v2.md    # Cache & embed improvements
+│   ├── MELHORIAS_EMBEDS_FINAIS.md      # Final embed design
+│   ├── MELHORIAS_RESULTADOS.md         # Result display improvements
+│   └── MELHORIAS_THUMBNAIL_v3.md       # Thumbnail enhancements
+├── INVESTIGACAO_*.md                   # Problem investigations
+│   ├── INVESTIGACAO_BEGIN_AT.md        # begin_at field analysis
+│   ├── CONCLUSAO_*.md                  # Investigation conclusions
+│   └── VALIDACAO_*.md                  # Validation reports
+├── LOGS_*.md                           # Logging documentation
+│   ├── LOGS_DETALHADOS.md              # Detailed logging spec
+│   ├── LOGS_README.md                  # Logging guide
+│   └── MUDANCAS_LOGS.md                # Logging change log
+├── SUMARIO_*.md                        # Executive summaries
+│   ├── SUMARIO_FINAL.md                # Final summary
+│   ├── RESUMO_EXECUTIVO.md             # Executive overview
+│   └── RESUMO_MELHORIAS_*.txt          # Feature summaries
+└── ESPECIFICACAO_*.md                  # Technical specifications
+    ├── ESPECIFICACAO_TECNICA.md        # Full technical spec
+    ├── INDICE_CORRECOES.md             # Bug fix index
+    └── INDICE_ARQUIVOS.md              # File index
+```
+
+**Rules**:
+- ✅ Create design docs: `/docs/ARQUITETURA_*.md`
+- ✅ Create investigation reports: `/docs/INVESTIGACAO_*.md`
+- ✅ Create feature docs: `/docs/MELHORIAS_*.md`
+- ✅ Create guides: `/docs/GUIA_*.md`
+- ✅ Use PREFIX_description.md naming (easy to group by prefix)
+- ❌ NEVER put code in docs/
+- ❌ NEVER commit large binary files
+- 📝 Always update docs/ when architecture changes
+
+### `/plan/` - Project Planning
+```
+plan/
+├── INDEX.md                            # Planning index
+├── TODO.md                             # Main task list (master source of truth)
+├── ROADMAP.md                          # Feature roadmap & timeline
+├── DUVIDAS.md                          # Open questions & uncertainties
+├── MELHORIAS_FUTURAS.md                # Backlog of future improvements
+├── CONCLUSAO.md                        # Project conclusions
+└── SUMARIO_MELHORIAS.md                # Improvement summary
+```
+
+**Rules**:
+- ✅ Track progress: Update `/plan/TODO.md` when starting/completing tasks
+- ✅ Document decisions: Add to `/plan/DUVIDAS.md` or `/plan/ROADMAP.md`
+- ❌ NEVER put code or detailed design here (use docs/ instead)
+
+### `/logs/` - Runtime Logs (Gitignored)
+```
+logs/
+└── bot.log                             # Auto-created by logging config
+                                        # Contains all runtime logs with timestamps
+```
+
+**Rules**:
+- ✅ Auto-created on first run (in `bot.py`)
+- ✅ UTF-8 encoded for Windows compatibility
+- ❌ NEVER commit (gitignored)
+- 📊 Tail for real-time debugging: `tail -f logs/bot.log`
+
+### `/data/` - Database & Local Data (Gitignored)
+```
+data/
+└── bot.db                              # libSQL database file (SQLite format)
+```
+
+**Rules**:
+- ✅ Auto-created on first run by `build_db.py`
+- ❌ NEVER commit (gitignored)
+- 🔄 Reset with: `python -m src.database.build_db`
+
+### Root-Level Config Files (Commit)
+```
+.github/
+├── copilot-instructions.md             # THIS FILE - AI agent guidance
+├── ...                                 # Other GitHub-specific config
+
+.env.example                            # Template for .env (commit this)
+requirements.txt                        # Python dependencies (commit)
+setup.py                                # Package setup (commit)
+SETUP.md                                # Setup instructions (commit)
+ENTREGA_FINAL.md                        # Delivery documentation (commit)
+```
+
+**Rules**:
+- ✅ Commit: `requirements.txt`, `setup.py`, `.env.example`, all `.md` files
+- ❌ NEVER commit: `.env`, `.db`, `venv/`, `__pycache__/`, `logs/`, `data/`
+
+## Testing & Validation
+
+- **Unit tests**: Scripts in `scripts/` (e.g., `check_api_status_filter.py`, `validate_cache_full.py`)
+- **Integration**: Use TESTING_GUILD_ID for safe testing without affecting production
+- **Logging inspection**: Tail `logs/bot.log` for real-time debugging
+- **Cache inspection**: `scripts/check_cache_content.py` dumps DB state
+
+## Key Files Reference
+
+| File | Purpose | Key Functions |
+|------|---------|----------------|
+| `src/bot.py` | Bot lifecycle & component initialization | `HLTVBot.__init__()`, `on_ready()` |
+| `src/services/pandascore_service.py` | API client | `get_upcoming_matches()`, `get_running_matches()`, `get_past_matches()` |
+| `src/services/cache_scheduler.py` | Background task scheduler | `update_all_matches()`, `update_live_matches()` |
+| `src/database/cache_manager.py` | Cache operations | `cache_matches()`, `get_cached_matches()`, `get_cached_matches_fast()` |
+| `src/services/notification_manager.py` | Reminder scheduling | `setup_reminders_for_match()`, `start_reminder_loop()` |
+| `src/cogs/matches.py` | Match query commands | `/partidas`, `/aovivo`, `/resultados` |
+| `src/database/schema.sql` | Database schema | 6 tables + indexes for fast lookups |
+| `src/utils/embeds.py` | Discord embed templates | `create_match_embed()`, `create_result_embed()` |

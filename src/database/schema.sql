@@ -80,6 +80,23 @@ CREATE INDEX IF NOT EXISTS idx_reminders_match ON match_reminders(match_id);
 CREATE INDEX IF NOT EXISTS idx_reminders_scheduled_time ON match_reminders(scheduled_time);
 CREATE INDEX IF NOT EXISTS idx_reminders_sent ON match_reminders(sent);
 
+-- Tabela para notificações de RESULTADO de partidas finalizadas
+CREATE TABLE IF NOT EXISTS match_result_notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    match_id INTEGER NOT NULL,
+    scheduled_time DATETIME NOT NULL,  -- Quando enviar (geralmente NOW)
+    sent BOOLEAN DEFAULT 0,            -- Se a notificação foi enviada
+    sent_at DATETIME,                  -- Quando foi enviada
+    FOREIGN KEY (guild_id) REFERENCES guild_config(guild_id) ON DELETE CASCADE,
+    UNIQUE(guild_id, match_id)         -- Uma notificação por partida por guild
+);
+
+CREATE INDEX IF NOT EXISTS idx_result_notif_guild ON match_result_notifications(guild_id);
+CREATE INDEX IF NOT EXISTS idx_result_notif_match ON match_result_notifications(match_id);
+CREATE INDEX IF NOT EXISTS idx_result_notif_scheduled ON match_result_notifications(scheduled_time);
+CREATE INDEX IF NOT EXISTS idx_result_notif_sent ON match_result_notifications(sent);
+
 -- Tabela de logs de atualização do cache
 CREATE TABLE IF NOT EXISTS cache_update_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

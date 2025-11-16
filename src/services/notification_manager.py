@@ -397,6 +397,203 @@ class NotificationManager:
         
         return embed
     
+    async def schedule_result_notification(self, guild_id: int, match_id: int) -> bool:
+        """
+        Agenda uma notificação de RESULTADO para ser enviada IMEDIATAMENTE.
+        
+        Args:
+            guild_id: ID do servidor Discord
+            match_id: ID da partida
+            
+        Returns:
+            bool: True se agendado com sucesso
+        """
+        try:
+            client = await self.cache_manager.get_client()
+            now = datetime.now()
+            
+            # Inserir com scheduled_time = AGORA (para envio rápido)
+            await client.execute(
+                """
+                INSERT INTO match_result_notifications
+                (guild_id, match_id, scheduled_time, sent)
+                VALUES (?, ?, ?, 0)
+                ON CONFLICT(guild_id, match_id) DO UPDATE SET
+                    scheduled_time = excluded.scheduled_time,
+                    sent = 0
+                """,
+                [guild_id, match_id, now.isoformat()]
+            )
+            
+            logger.info(f"📬 Resultado agendado: Guild {guild_id}, Match {match_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Erro ao agendar resultado: {e}")
+            return False
+    
+    async def send_pending_result_notifications(self) -> int:
+        """
+        Envia notificações de RESULTADO pendentes.
+        Similar a send_pending_reminders mas para resultados.
+        
+        Returns:
+            int: Número de notificações enviadas
+        """
+        try:
+            client = await self.cache_manager.get_client()
+            now = datetime.now()
+            
+            # Buscar notificações de resultado pendentes
+            result = await client.execute(
+                """
+                SELECT mrn.id, mrn.guild_id, mrn.match_id,
+                       mrn.scheduled_time, mc.match_data
+                FROM match_result_notifications mrn
+                JOIN matches_cache mc ON mrn.match_id = mc.match_id
+                WHERE mrn.sent = 0
+                AND datetime(mrn.scheduled_time) <= datetime(?)
+                ORDER BY mrn.scheduled_time ASC
+                """,
+                [now.isoformat()]
+            )
+            
+            result_notifications = result.rows if result.rows else []
+            sent_count = 0
+            
+            logger.info(f"   📊 {len(result_notifications)} notificação(ões) de resultado pendente(s)")
+            
+            if not result_notifications:
+                logger.debug(f"   ✅ Nenhuma notificação de resultado para enviar")
+                return 0
+            
+            for notification in result_notifications:
+                notif_id = notification[0]
+                guild_id = notification[1]
+                match_id = notification[2]
+                scheduled_time_str = notification[3]
+                match_data = notification[4]
+                
+                logger.info(f"   🚀 ENVIANDO RESULTADO: Match {match_id} para Guild {guild_id}")
+                
+                # Enviar notificação
+                if await self._send_result_notification(guild_id, match_id, match_data):
+                    # Marcar como enviado
+                    try:
+                        await client.execute(
+                            """
+                            UPDATE match_result_notifications
+                            SET sent = 1, sent_at = ?
+                            WHERE id = ?
+                            """,
+                            [now.isoformat(), notif_id]
+                        )
+                        sent_count += 1
+                        logger.info(f"      ✅ Resultado marcado como enviado")
+                    except Exception as e:
+                        logger.error(f"      ❌ Erro ao marcar como enviado: {e}")
+                else:
+                    logger.warning(f"      ⚠️ Falha ao enviar resultado")
+            
+            logger.info(f"   📈 Total de resultados enviados: {sent_count}")
+            return sent_count
+            
+        except Exception as e:
+            logger.error(f"❌ ERRO em send_pending_result_notifications: {type(e).__name__}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return 0
+    
+    async def _send_result_notification(
+        self,
+        guild_id: int,
+        match_id: int,
+        match_data: str
+    ) -> bool:
+        """
+        Envia uma notificação de RESULTADO para Discord.
+        
+        Args:
+            guild_id: ID do servidor
+            match_id: ID da partida
+            match_data: JSON da partida com resultado
+            
+        Returns:
+            bool: True se enviado com sucesso
+        """
+        try:
+            import json
+            from src.utils.embeds import create_result_embed
+            
+            logger.info(f"      [RESULT-INIT] Iniciando envio para guild {guild_id}, match {match_id}")
+            
+            # 1. Verificar se guild existe
+            guild = self.bot.get_guild(guild_id)
+            if not guild:
+                logger.error(f"      [RESULT-ERR] ❌ Guild {guild_id} NÃO encontrada")
+                return False
+            
+            logger.info(f"      [RESULT-OK] ✅ Guild encontrada: '{guild.name}'")
+            
+            # 2. Buscar configuração da guild
+            client = await self.cache_manager.get_client()
+            result = await client.execute(
+                "SELECT notification_channel_id FROM guild_config WHERE guild_id = ?",
+                [guild_id]
+            )
+            
+            if not result.rows:
+                logger.error(f"      [RESULT-ERR] ❌ Guild {guild_id} SEM configuração")
+                return False
+            
+            channel_id = result.rows[0][0]
+            
+            # 3. Verificar se channel_id foi configurado
+            if not channel_id:
+                logger.error(f"      [RESULT-ERR] ❌ Guild {guild_id} SEM canal configurado")
+                return False
+            
+            logger.info(f"      [RESULT-OK] ✅ Canal ID: {channel_id}")
+            
+            # 4. Buscar o canal
+            channel = self.bot.get_channel(channel_id)
+            if not channel:
+                logger.error(f"      [RESULT-ERR] ❌ Canal {channel_id} NÃO encontrado")
+                return False
+            
+            logger.info(f"      [RESULT-OK] ✅ Canal: #{channel.name}")
+            
+            # 5. Parsear dados da partida
+            try:
+                match = json.loads(match_data)
+                logger.info(f"      [RESULT-OK] ✅ Dados parseados")
+            except Exception as e:
+                logger.error(f"      [RESULT-ERR] ❌ Erro ao parsear JSON: {e}")
+                return False
+            
+            # 6. Criar embed de resultado
+            embed = create_result_embed(match)
+            logger.info(f"      [RESULT-OK] ✅ Embed criado")
+            
+            # 7. Enviar mensagem
+            try:
+                message = await channel.send(embed=embed)
+                logger.info(f"      [RESULT-SUCCESS] ✅ ENVIADA COM SUCESSO!")
+                logger.info(f"         Guild: {guild.name} ({guild_id})")
+                logger.info(f"         Canal: #{channel.name} ({channel_id})")
+                logger.info(f"         Partida: {match_id}")
+                logger.info(f"         MSG ID: {message.id}")
+                return True
+            except Exception as e:
+                logger.error(f"      [RESULT-ERR] ❌ Erro ao enviar: {type(e).__name__}: {e}")
+                return False
+            
+        except Exception as e:
+            logger.error(f"      [RESULT-FATAL] ❌ ERRO FATAL: {type(e).__name__}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return False
+    
     def start_reminder_loop(self):
         """Inicia o loop de verificação de lembretes."""
         if not self.is_running:
@@ -413,12 +610,19 @@ class NotificationManager:
     
     @tasks.loop(minutes=1)
     async def _reminder_loop(self):
-        """Loop que verifica lembretes a cada minuto."""
+        """Loop que verifica lembretes e resultados a cada minuto."""
         now = datetime.now().strftime('%H:%M:%S')
-        logger.info(f"🔍 [VERIFICAÇÃO] Checando lembretes pendentes - {now}")
-        count = await self.send_pending_reminders()
-        if count == 0:
-            logger.info(f"   ℹ️ Nenhum lembrete devido neste momento")
+        logger.info(f"🔍 [VERIFICAÇÃO] Checando notificações - {now}")
+        
+        # Enviar lembretes de INÍCIO
+        count_reminders = await self.send_pending_reminders()
+        
+        # ⭐ NOVO: Enviar notificações de RESULTADO
+        count_results = await self.send_pending_result_notifications()
+        
+        if count_reminders == 0 and count_results == 0:
+            logger.info(f"   ℹ️ Nenhuma notificação neste momento")
+        
         logger.info(f"✅ [VERIFICAÇÃO CONCLUÍDA] {now}")
     
     @_reminder_loop.before_loop

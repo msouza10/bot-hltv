@@ -221,6 +221,96 @@ class NotificationsCog(commands.Cog):
                 color=nextcord.Color.red()
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    @nextcord.slash_command(
+        name="notificacoes-resultado",
+        description="Ativa/desativa notificações de RESULTADO de partidas"
+    )
+    async def notificacoes_resultado(
+        self,
+        interaction: nextcord.Interaction,
+        ativar: bool = SlashOption(
+            name="ativar",
+            description="Ativar ou desativar notificações de resultado",
+            required=True
+        )
+    ):
+        """Ativa ou desativa notificações de RESULTADO de partidas finalizadas."""
+        
+        # Verificar permissões
+        if not interaction.user.guild_permissions.administrator:
+            embed = nextcord.Embed(
+                title="❌ Permissão Negada",
+                description="Apenas administradores podem configurar notificações.",
+                color=nextcord.Color.red()
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+        
+        guild_id = interaction.guild_id
+        
+        try:
+            client = await self.bot.cache_manager.get_client()
+            
+            # Garantir que existe registro de configuração
+            await client.execute(
+                """
+                INSERT OR IGNORE INTO guild_config (guild_id, notify_results)
+                VALUES (?, ?)
+                """,
+                [guild_id, 1 if ativar else 0]
+            )
+            
+            # Atualizar configuração
+            await client.execute(
+                """
+                UPDATE guild_config 
+                SET notify_results = ?
+                WHERE guild_id = ?
+                """,
+                [1 if ativar else 0, guild_id]
+            )
+            
+            status = "✅ **Ativadas**" if ativar else "❌ **Desativadas**"
+            
+            embed = nextcord.Embed(
+                title="Notificações de Resultado",
+                description=f"Notificações de RESULTADO agora estão {status}",
+                color=nextcord.Color.green() if ativar else nextcord.Color.red()
+            )
+            
+            if ativar:
+                embed.add_field(
+                    name="📬 O que você receberá",
+                    value="Notificações assim que uma partida termina com o resultado final",
+                    inline=False
+                )
+                embed.add_field(
+                    name="⏱️ Tempo de Notificação",
+                    value="~1-3 minutos após a partida terminar",
+                    inline=False
+                )
+            
+            embed.add_field(
+                name="ℹ️ Informação",
+                value="Configure o canal com `/canal-notificacoes` para usar esta funcionalidade",
+                inline=False
+            )
+            
+            embed.set_footer(text="Bot HLTV - Notificações de Partidas")
+            
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            
+            logger.info(f"✓ Notificações de resultado {'ativadas' if ativar else 'desativadas'} para guild {guild_id}")
+            
+        except Exception as e:
+            logger.error(f"Erro ao configurar notificações de resultado: {e}")
+            embed = nextcord.Embed(
+                title="❌ Erro",
+                description=f"Erro ao configurar: {str(e)}",
+                color=nextcord.Color.red()
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 def setup(bot):
