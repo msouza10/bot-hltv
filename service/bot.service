@@ -9,7 +9,7 @@ Type=simple
 Restart=always
 RestartSec=10
 User=root
-ExecStart=venv/bin/python -m src.bot
+ExecStart=/root/code/bot-hltv/venv/bin/python -m src.bot
 [Install]
 WantedBy=multi-user.target
 
