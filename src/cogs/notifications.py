@@ -75,7 +75,7 @@ class NotificationsCog(commands.Cog):
             
             if ativar:
                 # Agendar lembretes para todas as partidas no cache
-                matches = await self.bot.cache_manager.get_cached_matches_fast(guild_id)
+                matches = await self.bot.cache_manager.get_cached_matches_fast("not_started", limit=50)
                 
                 logger.info(f"📋 Comando /notificacoes ativar:true em guild {guild_id}")
                 logger.info(f"   📊 Total de partidas em cache: {len(matches) if matches else 0}")

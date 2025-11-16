@@ -66,7 +66,11 @@ class NotificationManager:
             
             # Converter string ISO para datetime
             if isinstance(begin_at, str):
-                match_time = datetime.fromisoformat(begin_at.replace('Z', '+00:00')).replace(tzinfo=None)
+                from datetime import timezone
+                # Parse com timezone UTC
+                match_time_utc = datetime.fromisoformat(begin_at.replace('Z', '+00:00'))
+                # Converter para hora local
+                match_time = match_time_utc.astimezone().replace(tzinfo=None)
             else:
                 match_time = begin_at
             
@@ -175,8 +179,9 @@ class NotificationManager:
         try:
             client = await self.cache_manager.get_client()
             now = datetime.now()
+            now_str = now.strftime('%H:%M:%S')
             
-            # Buscar TODOS os lembretes pendentes (não só os vencidos)
+            # Buscar TODOS os lembretes pendentes
             result = await client.execute(
                 """
                 SELECT mr.id, mr.guild_id, mr.match_id, mr.reminder_minutes_before,
@@ -191,10 +196,15 @@ class NotificationManager:
             
             all_reminders = result.rows if result.rows else []
             sent_count = 0
+            vencidos = 0
+            pendentes = 0
             
-            # Log de status geral
-            if all_reminders:
-                logger.debug(f"⏰ VERIFICAÇÃO DE LEMBRETES | Total pendentes: {len(all_reminders)} | Hora: {now.strftime('%H:%M:%S')}")
+            # Log inicial
+            logger.info(f"   📊 Total de lembretes pendentes (não enviados): {len(all_reminders)}")
+            
+            if not all_reminders:
+                logger.info(f"   ✅ Nenhum lembrete pendente no banco de dados")
+                return 0
             
             for reminder in all_reminders:
                 reminder_id = reminder[0]
@@ -207,16 +217,12 @@ class NotificationManager:
                 # Converter scheduled_time para datetime
                 scheduled_time = datetime.fromisoformat(scheduled_time_str)
                 time_until = scheduled_time - now
+                total_seconds = time_until.total_seconds()
                 
-                # Mostrar quanto tempo falta
-                if time_until.total_seconds() > 0:
-                    remaining_minutes = int(time_until.total_seconds() / 60)
-                    remaining_seconds = int(time_until.total_seconds() % 60)
-                    logger.debug(f"  ⏳ Partida {match_id} ({minutes_before}min): Faltam {remaining_minutes}m {remaining_seconds}s")
-                
-                # Enviar apenas se já venceu
-                if scheduled_time <= now:
-                    logger.info(f"  🚀 ENVIANDO: Partida {match_id} - Lembrete de {minutes_before} minutos")
+                # Verificar se já venceu
+                if total_seconds <= 0:
+                    vencidos += 1
+                    logger.info(f"   🚀 ENVIANDO AGORA: Match {match_id} | {minutes_before}min antes | Vencido há {abs(int(total_seconds))}s")
                     
                     # Enviar notificação
                     if await self._send_reminder_notification(guild_id, match_id, match_data, minutes_before):
@@ -231,19 +237,27 @@ class NotificationManager:
                                 [now.isoformat(), reminder_id]
                             )
                             sent_count += 1
-                            logger.info(f"  ✅ Marcado como enviado: Partida {match_id} ({minutes_before}min)")
+                            logger.info(f"      ✅ Sucesso: Lembrete marcado como enviado (ID: {reminder_id})")
                         except Exception as e:
-                            logger.error(f"  ❌ Erro ao marcar lembrete como enviado: {e}")
+                            logger.error(f"      ❌ Erro ao marcar como enviado: {e}")
                     else:
-                        logger.warning(f"  ⚠️ Falha ao enviar: Partida {match_id} ({minutes_before}min)")
+                        logger.warning(f"      ⚠️ Falha ao enviar notificação")
+                else:
+                    # Ainda não venceu
+                    pendentes += 1
+                    remaining_minutes = int(total_seconds / 60)
+                    remaining_seconds = int(total_seconds % 60)
+                    logger.info(f"   ⏳ Aguardando: Match {match_id} | {minutes_before}min | Falta {remaining_minutes}m {remaining_seconds}s")
             
-            if sent_count > 0:
-                logger.info(f"✅ Ciclo de lembretes concluído: {sent_count} enviados")
+            # Log final detalhado
+            logger.info(f"   📈 RESUMO: {vencidos} vencidos, {pendentes} ainda pendentes, {sent_count} enviados")
             
             return sent_count
             
         except Exception as e:
-            logger.error(f"Erro ao enviar lembretes pendentes: {e}")
+            logger.error(f"❌ ERRO em send_pending_reminders: {type(e).__name__}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return 0
     
     async def _send_reminder_notification(
@@ -268,16 +282,17 @@ class NotificationManager:
         try:
             import json
             
-            logger.debug(f"[NOTIF] Iniciando envio para guild {guild_id}, partida {match_id}")
+            logger.info(f"      [NOTIF-INIT] Iniciando envio para guild {guild_id}, match {match_id}")
             
+            # 1. Verificar se guild existe
             guild = self.bot.get_guild(guild_id)
             if not guild:
-                logger.error(f"[NOTIF] ❌ Guild {guild_id} não encontrada no bot")
+                logger.error(f"      [NOTIF-ERR] ❌ Guild {guild_id} NÃO encontrada no bot")
                 return False
             
-            logger.debug(f"[NOTIF] ✅ Guild encontrada: {guild.name}")
+            logger.info(f"      [NOTIF-OK] ✅ Guild encontrada: '{guild.name}' (ID: {guild_id})")
             
-            # Buscar canal de notificações
+            # 2. Buscar configuração da guild
             client = await self.cache_manager.get_client()
             result = await client.execute(
                 "SELECT notification_channel_id FROM guild_config WHERE guild_id = ?",
@@ -285,36 +300,54 @@ class NotificationManager:
             )
             
             if not result.rows:
-                logger.warning(f"[NOTIF] ⚠️ Guild {guild_id} não tem configuração no banco")
+                logger.error(f"      [NOTIF-ERR] ❌ Guild {guild_id} SEM configuração no banco")
                 return False
             
             channel_id = result.rows[0][0]
+            
+            # 3. Verificar se channel_id foi configurado
             if not channel_id:
-                logger.warning(f"[NOTIF] ⚠️ Guild {guild_id} não tem canal de notificações configurado")
+                logger.error(f"      [NOTIF-ERR] ❌ Guild {guild_id} SEM canal de notificações configurado")
                 return False
             
-            logger.debug(f"[NOTIF] Canal ID encontrado: {channel_id}")
+            logger.info(f"      [NOTIF-OK] ✅ Canal ID encontrado: {channel_id}")
             
+            # 4. Buscar o canal no bot
             channel = self.bot.get_channel(channel_id)
             if not channel:
-                logger.error(f"[NOTIF] ❌ Canal {channel_id} não encontrado no bot")
+                logger.error(f"      [NOTIF-ERR] ❌ Canal {channel_id} NÃO encontrado no bot")
                 return False
             
-            logger.debug(f"[NOTIF] ✅ Canal encontrado: #{channel.name}")
+            logger.info(f"      [NOTIF-OK] ✅ Canal encontrado: #{channel.name}")
             
-            # Parsear dados da partida
-            match = json.loads(match_data)
+            # 5. Parsear dados da partida
+            try:
+                match = json.loads(match_data)
+                logger.info(f"      [NOTIF-OK] ✅ Dados da partida parseados")
+            except Exception as e:
+                logger.error(f"      [NOTIF-ERR] ❌ Erro ao fazer parse do JSON: {e}")
+                return False
             
-            # Criar embed de notificação
+            # 6. Criar embed
             embed = self._create_reminder_embed(match, minutes_before)
+            logger.info(f"      [NOTIF-OK] ✅ Embed criado")
             
-            # Enviar mensagem
-            message = await channel.send(embed=embed)
-            logger.info(f"[NOTIF] ✅ ENVIADA: Guild {guild_id} | Partida {match_id} | {minutes_before}min | MSG ID: {message.id}")
-            return True
+            # 7. Enviar mensagem
+            try:
+                message = await channel.send(embed=embed)
+                logger.info(f"      [NOTIF-SUCCESS] ✅ ENVIADA COM SUCESSO!")
+                logger.info(f"         Guild: {guild.name} ({guild_id})")
+                logger.info(f"         Canal: #{channel.name} ({channel_id})")
+                logger.info(f"         Partida: {match_id}")
+                logger.info(f"         Lembrete: {minutes_before} minutos antes")
+                logger.info(f"         MSG ID: {message.id}")
+                return True
+            except Exception as e:
+                logger.error(f"      [NOTIF-ERR] ❌ Erro ao enviar no Discord: {type(e).__name__}: {e}")
+                return False
             
         except Exception as e:
-            logger.error(f"[NOTIF] ❌ Erro ao enviar notificação: {type(e).__name__}: {e}")
+            logger.error(f"      [NOTIF-FATAL] ❌ ERRO FATAL: {type(e).__name__}: {e}")
             import traceback
             logger.error(traceback.format_exc())
             return False
@@ -381,8 +414,12 @@ class NotificationManager:
     @tasks.loop(minutes=1)
     async def _reminder_loop(self):
         """Loop que verifica lembretes a cada minuto."""
-        logger.debug(f"🔍 Verificando lembretes pendentes...")
-        await self.send_pending_reminders()
+        now = datetime.now().strftime('%H:%M:%S')
+        logger.info(f"🔍 [VERIFICAÇÃO] Checando lembretes pendentes - {now}")
+        count = await self.send_pending_reminders()
+        if count == 0:
+            logger.info(f"   ℹ️ Nenhum lembrete devido neste momento")
+        logger.info(f"✅ [VERIFICAÇÃO CONCLUÍDA] {now}")
     
     @_reminder_loop.before_loop
     async def before_reminder_loop(self):
