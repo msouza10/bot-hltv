@@ -426,10 +426,19 @@ class CacheScheduler:
             logger.info(f"   ⚠️ {len(suspect_running)} partida(s) em running sem atualização recente")
             
             # Se temos suspeitas, buscar lista de finished atual
+            # IMPORTANTE: Buscar MÚLTIPLAS PÁGINAS para não perder partidas recentes
+            # As partidas podem estar na página 2 ou 3 dependendo do volume
             try:
-                finished_matches = await self.api_client.get_past_matches(hours=2, per_page=50)
+                finished_matches = []
+                # Buscar as 3 primeiras páginas (300 partidas) para garantir cobertura
+                for page in range(1, 4):
+                    page_matches = await self.api_client.get_past_matches(hours=24, per_page=100, page=page)
+                    finished_matches.extend(page_matches)
+                    if not page_matches:
+                        break
+                
                 finished_ids = {m.get('id'): m for m in finished_matches}
-                logger.info(f"   📊 Checando contra {len(finished_ids)} partidas finished")
+                logger.info(f"   📊 Checando contra {len(finished_ids)} partidas finished (páginas 1-3)")
             except Exception as e:
                 logger.error(f"   ✗ Erro ao buscar finished: {e}")
                 return

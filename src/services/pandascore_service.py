@@ -104,13 +104,14 @@ class PandaScoreClient:
         params = {"filter[status]": "running"}
         return await self._request("/csgo/matches/running", params)
     
-    async def get_past_matches(self, hours: int = 24, per_page: int = 10) -> List[Dict]:
+    async def get_past_matches(self, hours: int = 24, per_page: int = 10, page: int = 1) -> List[Dict]:
         """
         Busca partidas finalizadas recentemente.
         
         Args:
             hours: Buscar partidas das últimas X horas (não usado na API)
-            per_page: Número de partidas a retornar
+            per_page: Número de partidas a retornar por página
+            page: Número da página (padrão: 1)
             
         Returns:
             Lista de partidas finalizadas
@@ -118,10 +119,13 @@ class PandaScoreClient:
         # A API PandaScore retorna as partidas passadas ordenadas por data
         # Não precisa filtrar por data, ela já retorna as mais recentes
         # IMPORTANTE: filtrar por status=finished para excluir canceladas
+        # OTIMIZAÇÃO: Buscar 100 por página para melhor cobertura
+        actual_per_page = min(per_page, 100)
         params = {
             "filter[status]": "finished",
             "sort": "-end_at",
-            "per_page": min(per_page, 100)
+            "per_page": actual_per_page,
+            "page": page
         }
         return await self._request("/csgo/matches/past", params)
     
