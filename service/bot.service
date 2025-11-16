@@ -8,8 +8,8 @@ After=network.target
 Type=simple
 User=bot
 
-WorkingDirectory=/root/code/bot-hltv
-ExecStart=/root/code/bot-hltv/venv/bin/python -m src.bot
+WorkingDirectory=/opt/bot-hltv
+ExecStart=/opt/bot-hltv/venv/bin/python -m src.bot
 
 Restart=always
 RestartSec=5
