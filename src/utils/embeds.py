@@ -304,13 +304,13 @@ def create_result_embed(match_data: Dict) -> nextcord.Embed:
             team2_score = results[1].get("score", 0)
             
             if team1_score > team2_score:
-                title = f"{emoji} 🏆 {team1_name} {team1_score} - {team2_score} {team2_name}"
+                title = f"🏆 {team1_name} {team1_score} - {team2_score} {team2_name}"
             else:
-                title = f"{emoji} {team1_name} {team1_score} - {team2_score} 🏆 {team2_name}"
+                title = f"{team1_name} {team1_score} - {team2_score} {team2_name} 🏆"
             
             embed.title = title
         else:
-            embed.title = f"{emoji} {team1_name} vs {team2_name}"
+            embed.title = f"{team1_name} vs {team2_name}"
     
     # Torneio - com detalhes de serie/playoff
     torneio_value = league_name
@@ -373,15 +373,25 @@ def create_result_embed(match_data: Dict) -> nextcord.Embed:
         if games:
             for i, game in enumerate(games, 1):
                 winner = game.get("winner", {})
+                # Tentar extrair o nome do mapa
+                map_data = game.get("map", {})
+                map_name = map_data.get("name", "???") if isinstance(map_data, dict) else str(map_data)
+                
                 if winner:
                     winner_id = winner.get("id")
                     team1_id = opponents[0].get("opponent", {}).get("id") if len(opponents) > 0 else None
                     team2_id = opponents[1].get("opponent", {}).get("id") if len(opponents) > 1 else None
                     
+                    # Tentar extrair placar do jogo
+                    game_results = game.get("results", [])
+                    score_text = ""
+                    if game_results and len(game_results) >= 2:
+                        score_text = f" {game_results[0].get('score', '?')}-{game_results[1].get('score', '?')}"
+                    
                     if winner_id == team1_id:
-                        maps_detail.append(f"Jogo {i}: {team1_name} venceu")
+                        maps_detail.append(f"🗺️ Mapa {i} ({map_name}): {team1_name} venceu{score_text}")
                     elif winner_id == team2_id:
-                        maps_detail.append(f"Jogo {i}: {team2_name} venceu")
+                        maps_detail.append(f"🗺️ Mapa {i} ({map_name}): {team2_name} venceu{score_text}")
         
         if maps_detail:
             maps_text = "\n".join(maps_detail[:8])
