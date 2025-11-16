@@ -48,9 +48,20 @@ class NotificationManager:
         try:
             match_id = match.get('id')
             begin_at = match.get('begin_at')
+            status = match.get('status')
             
-            if not match_id or not begin_at:
-                logger.warning(f"Partida incompleta: id={match_id}, begin_at={begin_at}")
+            # Verificar se partida tem dados completos e está no futuro
+            if not match_id:
+                logger.debug(f"⏭️ Partida sem ID: Pulada")
+                return False
+            
+            # Só agendar partidas futuras (not_started ou running)
+            if status not in ['not_started', 'running']:
+                logger.debug(f"⏭️ Partida {match_id}: Status '{status}' - Pulada (não é futura)")
+                return False
+            
+            if not begin_at:
+                logger.debug(f"⏭️ Partida {match_id}: Sem begin_at - Pulada")
                 return False
             
             # Converter string ISO para datetime
@@ -119,9 +130,37 @@ class NotificationManager:
             int: Número de partidas com lembretes agendados
         """
         count = 0
+        skipped_no_status = 0
+        skipped_old_status = 0
+        skipped_no_begin = 0
+        
+        logger.info(f"📋 Filtrando {len(matches)} partidas para agendamento...")
+        
         for match in matches:
+            status = match.get('status')
+            begin_at = match.get('begin_at')
+            match_id = match.get('id')
+            
+            # Verificar status primeiro
+            if status not in ['not_started', 'running']:
+                skipped_old_status += 1
+                continue
+            
+            # Verificar begin_at
+            if not begin_at:
+                skipped_no_begin += 1
+                continue
+            
             if await self.setup_reminders_for_match(guild_id, match):
                 count += 1
+        
+        # Log de resumo
+        logger.info(f"✅ Resultado da filtragem:")
+        logger.info(f"   ✓ {count} partidas agendadas")
+        if skipped_old_status > 0:
+            logger.info(f"   ⏭️ {skipped_old_status} partidas puladas (status finished/canceled)")
+        if skipped_no_begin > 0:
+            logger.info(f"   ⏭️ {skipped_no_begin} partidas puladas (sem begin_at)")
         
         logger.info(f"✓ {count} partidas com lembretes agendados para guild {guild_id}")
         return count
