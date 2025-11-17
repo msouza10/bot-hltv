@@ -329,7 +329,7 @@ class NotificationManager:
                 return False
             
             # 6. Criar embed
-            embed = self._create_reminder_embed(match, minutes_before)
+            embed = await self._create_reminder_embed(match, minutes_before)
             logger.info(f"      [NOTIF-OK] ✅ Embed criado")
             
             # 7. Enviar mensagem
@@ -352,8 +352,8 @@ class NotificationManager:
             logger.error(traceback.format_exc())
             return False
     
-    def _create_reminder_embed(self, match: Dict, minutes_before: int) -> nextcord.Embed:
-        """Cria um embed para notificação de lembrete."""
+    async def _create_reminder_embed(self, match: Dict, minutes_before: int) -> nextcord.Embed:
+        """Cria um embed para notificação de lembrete com informações de streams."""
         
         # Definir texto do lembrete
         if minutes_before == 0:
@@ -392,6 +392,23 @@ class NotificationManager:
         
         begin_at = match.get('begin_at', 'Horário não disponível')
         embed.add_field(name="⏰ Horário", value=str(begin_at), inline=False)
+        
+        # NOVO: Adicionar streams se disponíveis
+        try:
+            match_id = match.get("id")
+            if match_id:
+                from src.utils.embeds import format_streams_field
+                streams = await self.cache_manager.get_match_streams(match_id)
+                if streams:
+                    formatted_streams = format_streams_field(streams)
+                    if formatted_streams:
+                        embed.add_field(
+                            name="📡 Streams",
+                            value=formatted_streams,
+                            inline=False
+                        )
+        except Exception as e:
+            logger.debug(f"Erro ao adicionar streams ao lembrete: {e}")
         
         embed.set_footer(text="Bot HLTV - Notificações de Partidas")
         
@@ -573,6 +590,24 @@ class NotificationManager:
             
             # 6. Criar embed de resultado
             embed = create_result_embed(match)
+            
+            # NOVO: Adicionar streams se disponíveis
+            try:
+                match_id = match.get("id")
+                if match_id:
+                    from src.utils.embeds import format_streams_field
+                    streams = await self.cache_manager.get_match_streams(match_id)
+                    if streams:
+                        formatted_streams = format_streams_field(streams)
+                        if formatted_streams:
+                            embed.add_field(
+                                name="📡 Streams",
+                                value=formatted_streams,
+                                inline=False
+                            )
+            except Exception as e:
+                logger.debug(f"Erro ao adicionar streams à notificação de resultado: {e}")
+            
             logger.info(f"      [RESULT-OK] ✅ Embed criado")
             
             # 7. Enviar mensagem

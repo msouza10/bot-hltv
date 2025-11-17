@@ -112,6 +112,11 @@ class MatchCacheManager:
                                 updated_at = CURRENT_TIMESTAMP
                         """, [match_id, match_data, status, tournament_name, begin_at, end_at])
                         
+                        # Cachear streams da partida se disponível
+                        streams_list = match.get("streams_list", [])
+                        if streams_list:
+                            await self.cache_streams(match_id, streams_list)
+                        
                         if exists:
                             stats["updated"] += 1
                         else:
@@ -164,13 +169,14 @@ class MatchCacheManager:
             
             if status == "results":
                 # Para /resultados: incluir finished, canceled, postponed
+                # Usar COALESCE(begin_at, updated_at) porque begin_at é NULL para finished
                 query = await asyncio.wait_for(
                     client.execute("""
                         SELECT match_data
                         FROM matches_cache
                         WHERE status IN ('finished', 'canceled', 'postponed')
                           AND updated_at >= ?
-                        ORDER BY begin_at DESC
+                        ORDER BY COALESCE(begin_at, updated_at) DESC
                         LIMIT ?
                     """, [cutoff, limit]),
                     timeout=self.QUERY_TIMEOUT
@@ -298,47 +304,55 @@ class MatchCacheManager:
         global _memory_cache
         
         try:
+            logger.debug("🔄 Iniciando atualização do cache em memória...")
+            
             # Próximas partidas
+            logger.debug("  1. Buscando upcoming...")
             result = await asyncio.wait_for(
                 client.execute("""
                     SELECT match_data FROM matches_cache
                     WHERE status = 'not_started'
                     ORDER BY begin_at ASC LIMIT 50
                 """),
-                timeout=1.0
+                timeout=10.0
             )
             _memory_cache["upcoming"] = [
                 json.loads(row["match_data"]) for row in result.rows
             ]
+            logger.debug(f"    ✓ {len(_memory_cache['upcoming'])} upcoming matches")
             
             # Partidas ao vivo
+            logger.debug("  2. Buscando running...")
             result = await asyncio.wait_for(
                 client.execute("""
                     SELECT match_data FROM matches_cache
                     WHERE status = 'running'
                     ORDER BY begin_at DESC LIMIT 10
                 """),
-                timeout=1.0
+                timeout=10.0
             )
             _memory_cache["running"] = [
                 json.loads(row["match_data"]) for row in result.rows
             ]
+            logger.debug(f"    ✓ {len(_memory_cache['running'])} running matches")
             
             # Resultados recentes (finished + canceled + postponed)
+            logger.debug("  3. Buscando finished...")
             result = await asyncio.wait_for(
                 client.execute("""
                     SELECT match_data FROM matches_cache
                     WHERE status IN ('finished', 'canceled', 'postponed')
                     ORDER BY begin_at DESC LIMIT 20
                 """),
-                timeout=1.0
+                timeout=10.0
             )
             _memory_cache["finished"] = [
                 json.loads(row["match_data"]) for row in result.rows
             ]
+            logger.debug(f"    ✓ {len(_memory_cache['finished'])} finished matches")
             
             _memory_cache["last_update"] = datetime.now()
-            logger.debug("✓ Cache em memória atualizado")
+            logger.debug("✓ Cache em memória atualizado com sucesso")
             
         except asyncio.TimeoutError:
             logger.warning("⚠️ Timeout ao atualizar cache em memória")
@@ -363,4 +377,182 @@ class MatchCacheManager:
         
         matches = _memory_cache.get(status) or []
         return matches[:limit]
+    
+    async def cache_streams(self, match_id: int, streams_list: List[Dict]) -> bool:
+        """
+        Armazena streams de uma partida no cache.
+        
+        ⚠️ IMPORTANTE: NÃO usa self._lock aqui! É chamado dentro de cache_matches()
+        que já tem o lock, para evitar deadlock.
+        
+        Args:
+            match_id: ID da partida
+            streams_list: Lista de streams da API PandaScore
+            
+        Returns:
+            bool: True se sucesso, False se erro
+        """
+        try:
+            # Validação
+            if not streams_list:
+                logger.debug(f"   ⚠️  Nenhum stream para match {match_id}")
+                return True  # Não é erro, apenas sem streams
+            
+            client = await self.get_client()
+            
+            # Limpar streams antigos da partida
+            await client.execute(
+                "DELETE FROM match_streams WHERE match_id = ?",
+                [match_id]
+            )
+            
+            # Inserir novos streams
+            cached_count = 0
+            for stream in streams_list:
+                # Garantir que tem raw_url
+                raw_url = stream.get("raw_url", "").strip()
+                if not raw_url:
+                    logger.warning(f"   ⚠️  Stream sem raw_url em match {match_id}: {stream}")
+                    continue
+                
+                platform = self._extract_platform(raw_url)
+                channel_name = self._extract_channel_name(raw_url)
+                
+                # Debug: log de cada stream sendo cacheado
+                logger.debug(f"   📡 Match {match_id}: {platform} / {channel_name} ({stream.get('language')})")
+                
+                # Usar embed_url se tiver, senão usar raw_url como fallback
+                url_for_db = stream.get("embed_url") or raw_url
+                
+                await client.execute(
+                    """INSERT INTO match_streams 
+                       (match_id, platform, channel_name, url, raw_url, language, is_official, is_main)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    [
+                        match_id,
+                        platform,
+                        channel_name,
+                        url_for_db,
+                        raw_url,
+                        stream.get("language", "unknown"),
+                        1 if stream.get("official", False) else 0,
+                        1 if stream.get("main", False) else 0
+                    ]
+                )
+                cached_count += 1
+            
+            logger.info(f"   📡 {cached_count} streams cacheados para match {match_id}")
+            return True
+            
+        except asyncio.TimeoutError:
+            logger.warning(f"⏱️ Timeout ao cachear streams para match {match_id}")
+            return False
+        except Exception as e:
+                logger.error(f"✗ Erro ao cachear streams: {e}")
+                return False
+    
+    async def get_match_streams(self, match_id: int) -> List[Dict]:
+        """
+        Obtém streams de uma partida do cache.
+        
+        Args:
+            match_id: ID da partida
+            
+        Returns:
+            Lista de dicts com informações dos streams
+        """
+        try:
+            client = await self.get_client()
+            
+            result = await asyncio.wait_for(
+                client.execute(
+                    """SELECT platform, channel_name, url, raw_url, language, is_official, is_main
+                       FROM match_streams
+                       WHERE match_id = ?
+                       ORDER BY is_main DESC, is_official DESC, language ASC""",
+                    [match_id]
+                ),
+                timeout=self.QUERY_TIMEOUT
+            )
+            
+            streams = []
+            for row in result.rows:
+                streams.append({
+                    "platform": row[0],
+                    "channel_name": row[1],
+                    "url": row[2],
+                    "raw_url": row[3],
+                    "language": row[4],
+                    "is_official": bool(row[5]),
+                    "is_main": bool(row[6])
+                })
+            
+            return streams
+            
+        except asyncio.TimeoutError:
+            logger.warning(f"⏱️ Timeout ao buscar streams para match {match_id}")
+            return []
+        except Exception as e:
+            logger.error(f"✗ Erro ao buscar streams: {e}")
+            return []
+    
+    @staticmethod
+    def _extract_platform(url: str) -> str:
+        """
+        Extrai a plataforma da URL da stream.
+        
+        Args:
+            url: URL bruta da stream
+            
+        Returns:
+            Nome da plataforma (twitch, kick, youtube, etc)
+        """
+        url_lower = url.lower()
+        if "twitch.tv" in url_lower:
+            return "twitch"
+        elif "kick.com" in url_lower:
+            return "kick"
+        elif "youtube.com" in url_lower or "youtu.be" in url_lower:
+            return "youtube"
+        elif "facebook.com" in url_lower or "fb.watch" in url_lower:
+            return "facebook"
+        else:
+            return "other"
+    
+    @staticmethod
+    def _extract_channel_name(url: str) -> str:
+        """
+        Extrai o nome do canal da URL da stream.
+        
+        Args:
+            url: URL bruta da stream
+            
+        Returns:
+            Nome do canal
+        """
+        # Remove protocolo
+        url = url.replace("https://", "").replace("http://", "")
+        
+        # Para Twitch: www.twitch.tv/channel_name
+        if "twitch.tv" in url:
+            parts = url.split("/")
+            return parts[-1] if len(parts) > 1 else "unknown"
+        
+        # Para Kick: kick.com/channel_name
+        elif "kick.com" in url:
+            parts = url.split("/")
+            return parts[-1] if len(parts) > 1 else "unknown"
+        
+        # Para YouTube: youtube.com/c/channel_name ou youtube.com/@channel_name
+        elif "youtube.com" in url:
+            parts = url.split("/")
+            return parts[-1] if len(parts) > 1 else "unknown"
+        
+        # Para Facebook
+        elif "facebook.com" in url or "fb.watch" in url:
+            parts = url.split("/")
+            return parts[-1] if len(parts) > 1 else "unknown"
+        
+        else:
+            return "unknown"
 

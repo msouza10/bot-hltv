@@ -7,6 +7,196 @@ from datetime import datetime
 from typing import Optional, List, Dict
 
 
+# Mapa de bandeiras por idioma
+LANGUAGE_FLAGS = {
+    "en": "🇬🇧",
+    "pt": "🇧🇷",
+    "pt-BR": "🇧🇷",
+    "ru": "🇷🇺",
+    "fr": "🇫🇷",
+    "de": "🇩🇪",
+    "es": "🇪🇸",
+    "ja": "🇯🇵",
+    "ko": "🇰🇷",
+    "zh": "🇨🇳",
+    "pl": "🇵🇱",
+    "tr": "🇹🇷",
+    "unknown": "❓"
+}
+
+# Ícones por plataforma
+PLATFORM_ICONS = {
+    "twitch": "📺",
+    "kick": "🎮",
+    "youtube": "📹",
+    "facebook": "👥",
+    "other": "🎥"
+}
+
+# Estrela de oficial
+OFFICIAL_STAR = "⭐"
+
+
+async def augment_match_with_streams(match_data: Dict, cache_manager) -> Dict:
+    """
+    Augmenta os dados de match com informações de streams do cache.
+    
+    ✨ OTIMIZAÇÃO: Se o match tiver streams_list IN MEMORY, formata direto
+    sem fazer operações DB. Só busca do cache se não tiver streams_list.
+    
+    Args:
+        match_data: Dados do match original
+        cache_manager: MatchCacheManager para buscar/cachear streams
+        
+    Returns:
+        match_data com campo 'formatted_streams' adicionado
+    """
+    try:
+        match_id = match_data.get("id")
+        if not match_id:
+            return match_data
+        
+        # OTIMIZAÇÃO: Se vem da API com streams_list, formata direto (sem DB!)
+        streams_list = match_data.get("streams_list", [])
+        if streams_list:
+            # Não faz DB aqui - formato direto da API
+            # A API retorna os dados estruturados
+            formatted = format_streams_field(streams_list)
+            if formatted:
+                match_data["formatted_streams"] = formatted
+                # Background: cachear para próximas vezes (não bloqueia resposta)
+                # Comentado por enquanto para evitar sobrecarga DB
+                # asyncio.create_task(cache_manager.cache_streams(match_id, streams_list))
+            return match_data
+        
+        # Se não tem streams_list, buscar do cache (menos frequente)
+        streams = await cache_manager.get_match_streams(match_id)
+        
+        if streams:
+            formatted = format_streams_field(streams)
+            match_data["formatted_streams"] = formatted
+    except Exception as e:
+        # Se houver erro, apenas não adiciona streams (graceful degradation)
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.debug(f"Erro ao augmentar match com streams: {e}")
+    
+    return match_data
+
+
+def format_streams_field(streams: List[Dict]) -> Optional[str]:
+    """
+    Formata lista de streams para exibição no embed.
+    
+    Suporta 2 formatos:
+    1. Dados da API: {raw_url, language, official, main}
+    2. Dados do DB: {platform, channel_name, language, is_official, is_main, url, raw_url}
+    
+    Formato output:
+    Twitch
+    - [Gaules](https://twitch.tv/gaules) 🇧🇷 ⭐
+    - [eplcs_ru](https://twitch.tv/eplcs_ru) 🇷🇺
+    
+    Kick
+    - [cct_cs2](https://kick.com/cct_cs2) 🇬🇧
+    
+    Args:
+        streams: Lista de dicts (API ou DB format)
+        
+    Returns:
+        String formatada ou None se sem streams
+    """
+    if not streams:
+        return None
+    
+    # ✨ NORMALIZAR: Converter streams da API para formato DB se necessário
+    normalized_streams = []
+    for stream in streams:
+        # Se não tem platform e channel_name, significa que vem da API
+        if "platform" not in stream or stream.get("platform") is None:
+            # Extrair platform e channel_name da raw_url (ou usar None se não tiver)
+            raw_url = stream.get("raw_url") or stream.get("embed_url", "")
+            if raw_url:
+                from src.database.cache_manager import MatchCacheManager
+                platform = MatchCacheManager._extract_platform(raw_url)
+                channel_name = MatchCacheManager._extract_channel_name(raw_url)
+            else:
+                platform = "other"
+                channel_name = "Unknown"
+                raw_url = ""
+            
+            # Criar versão normalizada
+            normalized = {
+                "platform": platform,
+                "channel_name": channel_name,
+                "language": stream.get("language", "unknown"),
+                "is_official": stream.get("official", False),  # API usa "official"
+                "is_main": stream.get("main", False),  # API usa "main"
+                "raw_url": raw_url,  # Guardar a URL para hyperlink
+            }
+        else:
+            # Já está no formato DB
+            normalized = {
+                "platform": stream.get("platform", "other"),
+                "channel_name": stream.get("channel_name", "Unknown"),
+                "language": stream.get("language", "unknown"),
+                "is_official": stream.get("is_official", False),
+                "is_main": stream.get("is_main", False),
+                "raw_url": stream.get("url") or stream.get("raw_url", ""),  # DB pode ter 'url' ou 'raw_url'
+            }
+        
+        normalized_streams.append(normalized)
+    
+    # Agrupar streams por plataforma
+    streams_by_platform = {}
+    for stream in normalized_streams:
+        platform = stream.get("platform", "other")
+        if platform not in streams_by_platform:
+            streams_by_platform[platform] = []
+        streams_by_platform[platform].append(stream)
+    
+    result_lines = []
+    
+    # Ordenar plataformas (twitch/kick primeiro)
+    platform_order = ["twitch", "kick", "youtube", "facebook", "other"]
+    
+    for platform in platform_order:
+        if platform not in streams_by_platform:
+            continue
+        
+        platform_streams = streams_by_platform[platform]
+        
+        # Adicionar cabeçalho da plataforma (sem emoji)
+        result_lines.append(f"**{platform.capitalize()}**")
+        
+        # Listar canais com flag e estrela (com hyperlink!)
+        for stream in platform_streams:
+            channel_name = stream.get("channel_name", "Unknown")
+            language = stream.get("language", "unknown")
+            is_official = stream.get("is_official", False)
+            raw_url = stream.get("raw_url", "")
+            
+            # Flag de idioma
+            language_flag = LANGUAGE_FLAGS.get(language, "❓")
+            
+            # Marker de oficial (estrela)
+            official_marker = f" -{OFFICIAL_STAR}" if is_official else ""
+            
+            # Criar hyperlink se tiver URL
+            if raw_url:
+                channel_link = f"[{channel_name}]({raw_url})"
+            else:
+                channel_link = channel_name
+            
+            # Formato: └ [channel_name](url) - 🇧🇷 -⭐
+            result_lines.append(f"└ {channel_link} - {language_flag}{official_marker}")
+    
+    if not result_lines:
+        return None
+    
+    return "\n".join(result_lines)
+
+
 def create_match_embed(match_data: Dict) -> nextcord.Embed:
     """
     Cria um embed formatado para exibir informações de uma partida.
@@ -17,6 +207,9 @@ def create_match_embed(match_data: Dict) -> nextcord.Embed:
     Returns:
         Embed do Discord formatado
     """
+    # Detectar se é partida futura (para avisar sobre streams)
+    status = match_data.get("status", "unknown")
+    is_upcoming = status == "not_started"
     # Extrair informações básicas
     match_id = match_data.get("id", "N/A")
     status = match_data.get("status", "unknown")
@@ -42,7 +235,10 @@ def create_match_embed(match_data: Dict) -> nextcord.Embed:
     
     # Formato
     number_of_games = match_data.get("number_of_games", 1)
-    match_type = f"BO{number_of_games}"
+    # Pegar match_type da API e combinar: "BO3 - Best Of"
+    api_match_type = match_data.get("match_type", "best_of")
+    type_display = api_match_type.replace("_", " ").title() if api_match_type else "Best Of"
+    match_type = f"BO{number_of_games} - {type_display}"
     
     # Determinar cor baseada no status
     color_map = {
@@ -70,7 +266,13 @@ def create_match_embed(match_data: Dict) -> nextcord.Embed:
     # Adicionar campos
     embed.add_field(
         name="🏆 Torneio",
-        value=f"{league_name}\n{serie_name}",
+        value=league_name,
+        inline=False
+    )
+    
+    embed.add_field(
+        name="📍 Série",
+        value=serie_name,
         inline=False
     )
     
@@ -168,31 +370,25 @@ def create_match_embed(match_data: Dict) -> nextcord.Embed:
             except:
                 pass
     
-    # Links
-    links = []
-    if match_data.get("official_stream_url"):
-        links.append(f"[Stream]({match_data['official_stream_url']})")
-    if match_data.get("live_url"):
-        links.append(f"[Live]({match_data['live_url']})")
-    
-    # Game info
-    game_info = []
-    videogame = match_data.get("videogame", {})
-    if videogame.get("name"):
-        game_info.append(videogame["name"])
-    
-    videogame_version = match_data.get("videogame_version", "")
-    if videogame_version:
-        game_info.append(f"v{videogame_version}")
-    
-    combined = links + game_info
-    
-    if combined:
-        embed.add_field(
-            name="🔗 Links",
-            value=" | ".join(combined),
-            inline=False
-        )
+    # NOVO: Streams disponíveis
+    # Nota: Isso será preenchido pelo código que chama create_match_embed
+    # Se o match_data contiver "formatted_streams", usamos
+    formatted_streams = match_data.get("formatted_streams")
+    if formatted_streams:
+        # Para partidas futuras, adicionar aviso sobre possíveis streams
+        if is_upcoming:
+            aviso_streams = f"{formatted_streams}\n\n📌 ***Transmissão oficial = ⭐***\n"
+            embed.add_field(
+                name="📡 Streams Previstas",
+                value=aviso_streams,
+                inline=False
+            )
+        else:
+            embed.add_field(
+                name="📡 Streams",
+                value=formatted_streams,
+                inline=False
+            )
     
     # Informações extras
     extras = []
@@ -205,13 +401,6 @@ def create_match_embed(match_data: Dict) -> nextcord.Embed:
     match_type_str = match_data.get("match_type", "")
     if match_type_str and match_type_str != "regular":
         extras.append(f"📋 {match_type_str.replace('_', ' ').title()}")
-    
-    if extras:
-        embed.add_field(
-            name="ℹ️ Info",
-            value=" | ".join(extras),
-            inline=True
-        )
     
     # Thumbnails - para futuras, priorizar time 1
     # Logo da liga como imagem grande de background
@@ -270,7 +459,10 @@ def create_result_embed(match_data: Dict) -> nextcord.Embed:
     
     # Formato
     number_of_games = match_data.get("number_of_games", 1)
-    match_type = f"BO{number_of_games}"
+    # Pegar match_type da API e combinar: "BO3 - Best Of"
+    api_match_type = match_data.get("match_type", "best_of")
+    type_display = api_match_type.replace("_", " ").title() if api_match_type else "Best Of"
+    match_type = f"BO{number_of_games} - {type_display}"
     
     # Determinar cor e emoji baseado no status
     if status == "canceled":
@@ -364,8 +556,10 @@ def create_result_embed(match_data: Dict) -> nextcord.Embed:
         team1_score = results[0].get("score", 0)
         team2_score = results[1].get("score", 0)
         
-        # Exibir em formato BO3, BO5, etc
-        match_format = f"BO{number_of_games}"
+        # Pegar match_type da API e combinar: "BO3 - Best Of"
+        api_match_type = match_data.get("match_type", "best_of")
+        type_display = api_match_type.replace("_", " ").title() if api_match_type else "Best Of"
+        match_format = f"BO{number_of_games} - {type_display}"
         maps_detail.append(f"**Resultado Final:** {team1_score}-{team2_score} ({match_format})")
         
         # Se temos games, mostrar um resumo por jogo
@@ -373,9 +567,6 @@ def create_result_embed(match_data: Dict) -> nextcord.Embed:
         if games:
             for i, game in enumerate(games, 1):
                 winner = game.get("winner", {})
-                # Tentar extrair o nome do mapa
-                map_data = game.get("map", {})
-                map_name = map_data.get("name", "???") if isinstance(map_data, dict) else str(map_data)
                 
                 if winner:
                     winner_id = winner.get("id")
@@ -389,9 +580,9 @@ def create_result_embed(match_data: Dict) -> nextcord.Embed:
                         score_text = f" {game_results[0].get('score', '?')}-{game_results[1].get('score', '?')}"
                     
                     if winner_id == team1_id:
-                        maps_detail.append(f"🗺️ Mapa {i} ({map_name}): {team1_name} venceu{score_text}")
+                        maps_detail.append(f"🎮 Jogo {i}: {team1_name} venceu{score_text}")
                     elif winner_id == team2_id:
-                        maps_detail.append(f"🗺️ Mapa {i} ({map_name}): {team2_name} venceu{score_text}")
+                        maps_detail.append(f"🎮 Jogo {i}: {team2_name} venceu{score_text}")
         
         if maps_detail:
             maps_text = "\n".join(maps_detail[:8])
@@ -470,6 +661,15 @@ def create_result_embed(match_data: Dict) -> nextcord.Embed:
         embed.add_field(
             name="ℹ️ Detalhes",
             value="\n".join(extras),
+            inline=False
+        )
+    
+    # NOVO: Streams disponíveis
+    formatted_streams = match_data.get("formatted_streams")
+    if formatted_streams:
+        embed.add_field(
+            name="📡 Streams",
+            value=formatted_streams,
             inline=False
         )
     

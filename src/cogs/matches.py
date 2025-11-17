@@ -2,13 +2,14 @@
 Cog para comandos relacionados a partidas de CS2 (usando Nextcord).
 """
 
+import asyncio
 import nextcord
 from nextcord.ext import commands
 from nextcord import SlashOption
 import logging
 from typing import Optional
 
-from src.utils.embeds import create_match_embed, create_result_embed, create_error_embed, create_info_embed
+from src.utils.embeds import create_match_embed, create_result_embed, create_error_embed, create_info_embed, augment_match_with_streams
 
 logger = logging.getLogger(__name__)
 
@@ -63,14 +64,22 @@ class MatchesCog(commands.Cog):
                 await interaction.followup.send(embed=embed)
                 return
             
-            # Criar embeds para cada partida
+            # Criar embeds para cada partida - augmentar em paralelo
+            augmented_matches = await asyncio.gather(
+                *[augment_match_with_streams(m, self.bot.cache_manager) for m in matches[:quantidade]],
+                return_exceptions=True
+            )
+            
             embeds = []
-            for match in matches[:quantidade]:
+            for match in augmented_matches:
                 try:
+                    if isinstance(match, Exception):
+                        logger.error(f"Erro ao augmentar match: {match}")
+                        continue
                     embed = create_match_embed(match)
                     embeds.append(embed)
                 except Exception as e:
-                    logger.error(f"Erro ao criar embed para partida {match.get('id')}: {e}")
+                    logger.error(f"Erro ao criar embed: {e}")
             
             if not embeds:
                 embed = create_error_embed(
@@ -129,9 +138,18 @@ class MatchesCog(commands.Cog):
                 await interaction.followup.send(embed=embed)
                 return
             
+            # Augmentar todos os matches com streams em paralelo
+            augmented_matches = await asyncio.gather(
+                *[augment_match_with_streams(m, self.bot.cache_manager) for m in matches[:10]],
+                return_exceptions=True
+            )
+            
             embeds = []
-            for match in matches[:10]:
+            for match in augmented_matches:
                 try:
+                    if isinstance(match, Exception):
+                        logger.error(f"Erro ao augmentar match: {match}")
+                        continue
                     embed = create_match_embed(match)
                     embeds.append(embed)
                 except Exception as e:
@@ -209,9 +227,18 @@ class MatchesCog(commands.Cog):
                 await interaction.followup.send(embed=embed)
                 return
             
+            # Augmentar todos os matches com streams em paralelo
+            augmented_matches = await asyncio.gather(
+                *[augment_match_with_streams(m, self.bot.cache_manager) for m in matches[:quantidade]],
+                return_exceptions=True
+            )
+            
             embeds = []
-            for match in matches[:quantidade]:
+            for match in augmented_matches:
                 try:
+                    if isinstance(match, Exception):
+                        logger.error(f"Erro ao augmentar match: {match}")
+                        continue
                     # Usar função otimizada para resultados
                     embed = create_result_embed(match)
                     embeds.append(embed)

@@ -124,6 +124,55 @@ Always check `notification_history` before sending; mark sent in `match_reminder
   - `GET /csgo/matches/past?filter[status]=finished`
   - `GET /csgo/matches/past?filter[status]=canceled`
 
+#### ⚠️ CRITICAL: PandaScore API Response Variations by Match Status
+
+**ALWAYS consider these differences when processing match data:**
+
+1. **UPCOMING** (`status: "not_started"`)
+   - ✅ `begin_at`: ALWAYS populated (ISO 8601 timestamp)
+   - ✅ `scheduled_at`: Equals `begin_at`
+   - ❌ `end_at`: Always null
+   - ❌ `winner`: Always null
+   - ✅ `games[*].status`: All "not_started"
+   - ✅ `results[*].score`: Both 0
+
+2. **RUNNING** (`status: "running"`)
+   - ✅ `begin_at`: Actual start time (may differ from `scheduled_at`)
+   - ✅ `scheduled_at`: Original planned time
+   - ❌ `end_at`: Always null (match in progress)
+   - ❌ `winner`: Always null (undecided)
+   - 🔀 `games[*].status`: Mix of "finished" (completed games) and "running" (current game)
+   - ✅ `games[*].length`: Duration in seconds for finished games
+   - ✅ `results[*].score`: Partial score (e.g., 1-1 for 2 games played)
+
+3. **FINISHED/CANCELED** (`status: "finished"` or `"canceled"`)
+   - ❌ `begin_at`: **ALWAYS null** (no temporal data in historical data!)
+   - ❌ `scheduled_at`: Always null
+   - ❌ `end_at`: Always null (API limitation)
+   - ✅ `winner`: Populated for finished matches, null for canceled
+   - ✅ `winner_id`: Team ID of winner (if finished)
+   - ✅ `games[*].status`: All "finished"
+   - ✅ `results[*].score`: Final score (loser: 0, winner: 2 for BO3)
+   - ⚠️ `games[*].begin_at`: May be null even when finished
+   - ⚠️ `games[*].end_at`: May be null even when finished
+   - **FALLBACK**: Use `modified_at` timestamp as proxy for when match occurred
+
+**Response Headers (always check):**
+- `X-Rate-Limit-Remaining`: Stop if < 50 (hourly quota near limit)
+- `X-Total`: Total matches available (check if more pages needed)
+- `X-Page` / `X-Per-Page`: Pagination info
+- `Link`: Contains `rel="next"` URL for pagination
+
+**Edge Cases to Handle:**
+- `opponents[*].dark_mode_image_url`: Can be null → fallback to `image_url`
+- `opponents[*].acronym`: Can be null → fallback to first 3 chars of `name`
+- `opponents[*].location`: Can be empty string → handle as "Unknown"
+- `tournament.prizepool`: Can be null → display as "N/A"
+- `games[*].forfeit`: true = non-competitive win (add "W.O." badge)
+- `games[*].length`: null for some finished games (partial data)
+
+**See `docs/ANALISE_ESTRUTURA_API_PANDASCORE.md` for complete field reference.**
+
 ### Discord via Nextcord
 - Slash command registration: Use `@nextcord.slash_command(name="...", description="...")` decorator
 - Interactions must defer with `await interaction.response.defer()` if >3s processing expected

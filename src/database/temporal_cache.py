@@ -220,6 +220,12 @@ async def ensure_temporal_coverage(
             newest = TemporalCacheManager.parse_api_datetime(newest_str)
             
             if oldest and newest:
+                # Garantir que ambos são timezone-aware para subtração
+                if oldest.tzinfo is None:
+                    oldest = oldest.replace(tzinfo=timezone.utc)
+                if newest.tzinfo is None:
+                    newest = newest.replace(tzinfo=timezone.utc)
+                
                 current_coverage = (newest - oldest).total_seconds() / 3600
                 stats["current_coverage_hours"] = round(current_coverage, 1)
                 stats["oldest_match"] = oldest_str
@@ -301,6 +307,12 @@ async def ensure_temporal_coverage(
                 newest = TemporalCacheManager.parse_api_datetime(newest_str)
                 
                 if oldest and newest:
+                    # Garantir que ambos são timezone-aware para subtração
+                    if oldest.tzinfo is None:
+                        oldest = oldest.replace(tzinfo=timezone.utc)
+                    if newest.tzinfo is None:
+                        newest = newest.replace(tzinfo=timezone.utc)
+                    
                     current_coverage = (newest - oldest).total_seconds() / 3600
                     stats["current_coverage_hours"] = round(current_coverage, 1)
             

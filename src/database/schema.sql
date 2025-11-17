@@ -97,6 +97,28 @@ CREATE INDEX IF NOT EXISTS idx_result_notif_match ON match_result_notifications(
 CREATE INDEX IF NOT EXISTS idx_result_notif_scheduled ON match_result_notifications(scheduled_time);
 CREATE INDEX IF NOT EXISTS idx_result_notif_sent ON match_result_notifications(sent);
 
+-- Tabela para cache de streams de partidas
+CREATE TABLE IF NOT EXISTS match_streams (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    match_id INTEGER NOT NULL,
+    platform TEXT NOT NULL,         -- twitch, kick, youtube, etc
+    channel_name TEXT NOT NULL,     -- Nome do canal
+    url TEXT NOT NULL,              -- URL da stream
+    raw_url TEXT,                   -- URL raw (sem embed)
+    language TEXT NOT NULL,         -- Idioma (en, pt, ru, etc)
+    is_official BOOLEAN DEFAULT 0,  -- true = stream oficial
+    is_main BOOLEAN DEFAULT 0,      -- true = stream primária
+    cached_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (match_id) REFERENCES matches_cache(match_id) ON DELETE CASCADE,
+    UNIQUE(match_id, platform, channel_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_streams_match ON match_streams(match_id);
+CREATE INDEX IF NOT EXISTS idx_streams_official ON match_streams(is_official);
+CREATE INDEX IF NOT EXISTS idx_streams_main ON match_streams(is_main);
+CREATE INDEX IF NOT EXISTS idx_streams_language ON match_streams(language);
+
 -- Tabela de logs de atualização do cache
 CREATE TABLE IF NOT EXISTS cache_update_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

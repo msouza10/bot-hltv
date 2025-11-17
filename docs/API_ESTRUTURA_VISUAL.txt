@@ -1,0 +1,212 @@
+╔════════════════════════════════════════════════════════════════════════════╗
+║               🎯 ESTRUTURA PANDASCORE - MAPA MENTAL VISUAL                ║
+║                    Tudo que Precisa Saber Sobre a API                    ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+┌─ API ENDPOINTS ─────────────────────────────────────────────────────────────┐
+│                                                                             │
+│  🟦 /csgo/matches/upcoming                                                 │
+│     └─> Status: "not_started"                                             │
+│         ├─ begin_at: ✅ SEMPRE preenchido                                 │
+│         ├─ games[*].status: "not_started"                                 │
+│         └─ results: [0, 0]                                                │
+│                                                                             │
+│  🔴 /csgo/matches/running                                                  │
+│     └─> Status: "running"                                                 │
+│         ├─ begin_at: ✅ Hora real de início                               │
+│         ├─ games[*].status: MISTO (finished + running)                    │
+│         └─ results: [1, 1] ou similar                                     │
+│                                                                             │
+│  ⚪ /csgo/matches/past?filter[status]=finished                             │
+│     └─> Status: "finished"                                                │
+│         ├─ begin_at: ❌ **NULL sempre!** Usar modified_at                 │
+│         ├─ games[*].status: "finished"                                    │
+│         └─ winner_id: ✅ Preenchido                                       │
+│                                                                             │
+│  ⚫ /csgo/matches/past?filter[status]=canceled                             │
+│     └─> Status: "canceled"                                                │
+│         ├─ begin_at: ❌ null                                              │
+│         ├─ winner_id: null                                                │
+│         └─ games: Pode estar vazio []                                     │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌─ CAMPOS CRÍTICOS POR STATUS ────────────────────────────────────────────────┐
+│                                                                             │
+│         Status    │  begin_at  │  end_at  │  winner  │  games             │
+│  ───────────────┼──────────────┼──────────┼──────────┼─────────────────   │
+│  not_started    │   ✅ Date    │   null   │   null   │ All not_started   │
+│  running        │   ✅ Date    │   null   │   null   │ Mixed: fin+run    │
+│  finished       │   ❌ null    │   null   │   ✅ ID  │ All finished      │
+│  canceled       │   ❌ null    │   null   │   null   │ Vazio ou partial  │
+│                                                                             │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌─ GAMES ARRAY (Sempre 3 para BO3) ───────────────────────────────────────────┐
+│                                                                             │
+│  UPCOMING Match:                                                           │
+│  ├─ games[0] → status: "not_started", begin_at: null, end_at: null      │
+│  ├─ games[1] → status: "not_started", begin_at: null, end_at: null      │
+│  └─ games[2] → status: "not_started", begin_at: null, end_at: null      │
+│                                                                             │
+│  RUNNING Match:                                                            │
+│  ├─ games[0] → status: "finished", begin_at: ..., end_at: ..., winner   │
+│  ├─ games[1] → status: "finished", begin_at: ..., end_at: ..., winner   │
+│  └─ games[2] → status: "running",  begin_at: ..., end_at: null          │
+│                                                                             │
+│  FINISHED Match:                                                           │
+│  ├─ games[0] → status: "finished", begin_at: null, end_at: null ⚠️      │
+│  ├─ games[1] → status: "finished", begin_at: null, end_at: null ⚠️      │
+│  └─ games[2] → status: "finished", begin_at: null, end_at: null ⚠️      │
+│                                                                             │
+│  ⚠️ NOTE: Em finished, begin_at/end_at pode ser null mesmo!              │
+│                                                                             │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌─ TEAMS/OPPONENTS (Array de 2) ──────────────────────────────────────────────┐
+│                                                                             │
+│  ✅ SEGURO:                                                                │
+│  opponents[0].opponent.id          → Team ID 135092                       │
+│  opponents[0].opponent.name        → "ALLINNERS"                          │
+│  opponents[1].opponent.id          → Team ID 137476                       │
+│                                                                             │
+│  ⚠️ PODE SER NULL/VAZIO:                                                   │
+│  opponents[0].opponent.acronym     → null? Usar name[:3]                  │
+│  opponents[0].opponent.location    → ""?   Usar "Unknown"                │
+│  opponents[0].opponent.dark_mode_image_url → null? Use image_url         │
+│                                                                             │
+│  PADRÃO SEGURO:                                                            │
+│  team_name = opponent.get('acronym') or opponent.get('name')[:3]         │
+│  team_image = opponent.get('dark_mode_image_url') or opponent['image_url']
+│                                                                             │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌─ RESULTS (Score do Match, NÃO dos games) ───────────────────────────────────┐
+│                                                                             │
+│  UPCOMING:                                                                  │
+│  "results": [{"team_id": 135092, "score": 0},                            │
+│              {"team_id": 137476, "score": 0}]                            │
+│                                                                             │
+│  RUNNING (depois de 2 games):                                              │
+│  "results": [{"team_id": 135092, "score": 1},                            │
+│              {"team_id": 137476, "score": 1}]  ← Score atual 1-1         │
+│                                                                             │
+│  FINISHED:                                                                  │
+│  "results": [{"team_id": 135092, "score": 0},                            │
+│              {"team_id": 137476, "score": 2}]  ← Time 2 venceu 2-0       │
+│                                                                             │
+│  📌 Ordem sempre: results[0] é opponents[0], results[1] é opponents[1]   │
+│                                                                             │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌─ RESPONSE HEADERS (CRÍTICO!) ────────────────────────────────────────────────┐
+│                                                                             │
+│  X-Rate-Limit-Remaining: 889                                              │
+│  └─ Se < 50: PARAR! Limite horário atingido                               │
+│                                                                             │
+│  X-Rate-Limit-Used: 111                                                   │
+│  └─ Requisições usadas nesta hora (máx 1000)                              │
+│                                                                             │
+│  X-Total: 288                                                              │
+│  └─ Total de matches neste endpoint                                        │
+│                                                                             │
+│  X-Page: 1                                                                 │
+│  X-Per-Page: 10                                                            │
+│  └─ Paginação (página 1, 10 itens por página)                             │
+│                                                                             │
+│  Link: <https://...?page=2>; rel="next"                                   │
+│  └─ Seguir para próxima página se X-Total > X-Page * X-Per-Page          │
+│                                                                             │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌─ PADRÕES DE ACESSO SEGURO (Python) ─────────────────────────────────────────┐
+│                                                                             │
+│  # Hora do match                                                           │
+│  match_time = match['begin_at'] if match['status'] in ['not_started',   │
+│                                                        'running']          │
+│              else match['modified_at']                                    │
+│                                                                             │
+│  # Time 1                                                                  │
+│  team1 = match['opponents'][0]['opponent']                                │
+│  team1_name = team1.get('acronym') or team1.get('name', 'Unk')[:3]       │
+│  team1_img = team1.get('dark_mode_image_url') or team1.get('image_url')  │
+│                                                                             │
+│  # Score                                                                   │
+│  score_str = f"{match['results'][0]['score']}-{match['results'][1]['score']}"
+│                                                                             │
+│  # Winner (se finished)                                                    │
+│  winner_id = match.get('winner_id') if match['status'] == 'finished' else None
+│                                                                             │
+│  # Stream                                                                  │
+│  stream = next((s for s in match.get('streams_list', [])                │
+│                if s['main']), None)                                       │
+│  stream_url = stream['raw_url'] if stream else None                       │
+│                                                                             │
+│  # Forfeit (Walkover)                                                      │
+│  is_forfeit = match.get('forfeit', False)                                 │
+│  if is_forfeit: print("⚠️ W.O. - Vitória por não comparecimento")        │
+│                                                                             │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌─ EDGE CASES QUE VÃO ACONTECER ──────────────────────────────────────────────┐
+│                                                                             │
+│  1. opponent.acronym = null                                                │
+│     FIX: acronym = opponent.get('acronym') or opponent['name'][:3]        │
+│                                                                             │
+│  2. opponent.location = ""                                                 │
+│     FIX: location = opponent.get('location') or 'Unknown'                 │
+│                                                                             │
+│  3. opponent.dark_mode_image_url = null                                     │
+│     FIX: img = opponent.get('dark_mode_image_url') or opponent['image_url']
+│                                                                             │
+│  4. tournament.prizepool = null                                            │
+│     FIX: prize = tournament.get('prizepool') or 'N/A'                      │
+│                                                                             │
+│  5. games[i].begin_at = null (em finished)                                │
+│     FIX: Usar match['modified_at'] como proxy temporal                     │
+│                                                                             │
+│  6. games[i].forfeit = true                                                │
+│     FIX: Adicionar badge "W.O." no embed                                  │
+│                                                                             │
+│  7. match.draw = true (raro mas possível)                                  │
+│     FIX: Tratar como resultado indeciso                                    │
+│                                                                             │
+│  8. streams_list = []                                                      │
+│     FIX: Usar next(..., None) para evitar erro                            │
+│                                                                             │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌─ DECISÕES DE DESIGN ────────────────────────────────────────────────────────┐
+│                                                                             │
+│  ✅ SEMPRE fazer essas verificações:                                       │
+│     • Validar X-Rate-Limit-Remaining antes de request                     │
+│     • Verificar status do match (determina estrutura)                     │
+│     • Usar fallbacks para campos null                                      │
+│     • Usar modified_at para matches finished/canceled                      │
+│                                                                             │
+│  ✅ SEMPRE considerar:                                                      │
+│     • Games em RUNNING podem estar parcialmente completos                 │
+│     • FINISHED matches não têm temporal data no retorno                   │
+│     • Team images podem ter múltiplas versões (dark_mode)                │
+│     • Scores parciais durante matches em andamento                        │
+│                                                                             │
+│  ❌ NUNCA assumir:                                                         │
+│     • Que begin_at será preenchido (não é em finished)                    │
+│     • Que arrays vão ter tamanho específico                                │
+│     • Que campos null são bugs (é design da API)                          │
+│     • Que ordenação será mantida entre requisições                        │
+│                                                                             │
+└────────────────────────────────────────────────────────────────────────────┘
+
+═════════════════════════════════════════════════════════════════════════════════
+
+📚 DOCUMENTAÇÃO COMPLETA:
+   • docs/ANALISE_ESTRUTURA_API_PANDASCORE.md  ← Análise profunda
+   • docs/PANDASCORE_API_QUICK_REFERENCE.txt   ← Referência visual
+   • data/api_raw_responses.json                ← Dados reais coletados
+
+🔧 FERRAMENTAS:
+   • scripts/test_api_raw.py                   ← Testar API diretamente
+   • scripts/generate_api_summary.py           ← Regenerar este arquivo
+
+═════════════════════════════════════════════════════════════════════════════════

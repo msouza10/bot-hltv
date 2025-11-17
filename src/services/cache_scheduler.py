@@ -113,6 +113,19 @@ class CacheScheduler:
                     stats = await self.cache_manager.cache_matches(all_matches, "all")
                     logger.info(f"✓ Cache atualizado: {stats['added']} novas, {stats['updated']} atualizadas")
                     
+                    # 🚀 NOVA OTIMIZAÇÃO: Cachear streams das partidas com streams_list
+                    streams_cached = 0
+                    for match in all_matches:
+                        if match.get("streams_list"):
+                            try:
+                                await self.cache_manager.cache_streams(match["id"], match["streams_list"])
+                                streams_cached += 1
+                            except Exception as e:
+                                logger.debug(f"Erro ao cachear streams do match {match.get('id')}: {e}")
+                    
+                    if streams_cached > 0:
+                        logger.info(f"  📡 {streams_cached} partidas com streams cacheadas")
+                    
                     # Agendar lembretes para as novas partidas
                     if self.notification_manager and stats['added'] > 0:
                         for match in all_matches:
@@ -260,7 +273,20 @@ class CacheScheduler:
                     stats = await self.cache_manager.cache_matches(running, "running")
                     logger.info(f"✓ {len(running)} partidas ao vivo atualizadas")
                     
-                    # 🔥 VALIDAÇÃO IMEDIATA: Verificar se alguma running virou finished
+                    # � NOVA OTIMIZAÇÃO: Cachear streams das partidas ao vivo
+                    streams_cached = 0
+                    for match in running:
+                        if match.get("streams_list"):
+                            try:
+                                await self.cache_manager.cache_streams(match["id"], match["streams_list"])
+                                streams_cached += 1
+                            except Exception as e:
+                                logger.debug(f"Erro ao cachear streams do match {match.get('id')}: {e}")
+                    
+                    if streams_cached > 0:
+                        logger.info(f"  📡 {streams_cached} streams ao vivo cacheadas")
+                    
+                    # �🔥 VALIDAÇÃO IMEDIATA: Verificar se alguma running virou finished
                     await self.check_running_to_finished_transitions(running)
                 else:
                     logger.info("ℹ️ Nenhuma partida ao vivo no momento")
