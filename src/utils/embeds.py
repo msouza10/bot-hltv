@@ -627,19 +627,12 @@ def _resolve_tz_abbr_and_offset(timezone: str, dt_local: Optional[datetime] = No
     abbr = None
     offset_str = None
 
-    if dt_local:
-        try:
-            abbr = dt_local.tzname()
-        except Exception as e:
-            logger.debug(f"Erro obtendo tzname de dt_local: {e}")
-            abbr = None
-
-    if not abbr:
-        try:
-            abbr = TimezoneManager.get_timezone_abbreviation(timezone)
-        except Exception as e:
-            logger.debug(f"TimezoneManager.get_timezone_abbreviation erro: {e}")
-            abbr = None
+    # Prefer mapping from TimezoneManager (dictionary), avoid using tzname/tzinfo
+    try:
+        abbr = TimezoneManager.get_timezone_abbreviation(timezone, dt_local)
+    except Exception as e:
+        logger.debug(f"TimezoneManager.get_timezone_abbreviation erro: {e}")
+        abbr = None
 
     # Normalize if it's an offset like '-03' or '+02'
     if abbr and re.match(r"^[-+]?\d+$", abbr):
@@ -874,15 +867,16 @@ def create_match_embed(match_data: Dict, timezone: str = "America/Sao_Paulo") ->
             try:
                 start = TimezoneManager.parse_iso_datetime(scheduled_at)
                 end = TimezoneManager.parse_iso_datetime(end_at)
-                duration_seconds = (end - start).total_seconds()
-                hours = int(duration_seconds // 3600)
-                minutes = int((duration_seconds % 3600) // 60)
-                duration_text = f"{hours}h {minutes}m" if hours > 0 else f"{minutes}m"
-                embed.add_field(
-                    name="⏱️ Duração",
-                    value=duration_text,
-                    inline=True
-                )
+                if start and end:
+                    duration_seconds = (end - start).total_seconds()
+                    hours = int(duration_seconds // 3600)
+                    minutes = int((duration_seconds % 3600) // 60)
+                    duration_text = f"{hours}h {minutes}m" if hours > 0 else f"{minutes}m"
+                    embed.add_field(
+                        name="⏱️ Duração",
+                        value=duration_text,
+                        inline=True
+                    )
             except Exception as e:
                 logger.debug(f"Erro ao calcular duração (match embed): {e}")
     
@@ -946,7 +940,7 @@ def create_match_embed(match_data: Dict, timezone: str = "America/Sao_Paulo") ->
     
     # Footer com informações importantes
     # ✨ NOVO: Mostrar timezone configurado do servidor (versão híbrida)
-    tz_abbr = TimezoneManager.get_timezone_abbreviation(timezone)
+    tz_abbr = TimezoneManager.get_timezone_abbreviation(timezone, display_dt_local or now_local)
     tz_offset = TimezoneManager.get_timezone_offset(timezone)
     
     # Footer format: "Match ID: 123 • PandaScore API • BRT (UTC-3)"
@@ -1172,15 +1166,16 @@ def create_result_embed(match_data: Dict, timezone: str = "America/Sao_Paulo") -
         try:
             start = TimezoneManager.parse_iso_datetime(begin_at)
             end = TimezoneManager.parse_iso_datetime(end_at)
-            duration_seconds = (end - start).total_seconds()
-            hours = int(duration_seconds // 3600)
-            minutes = int((duration_seconds % 3600) // 60)
-            duration_text = f"{hours}h {minutes}m" if hours > 0 else f"{minutes}m"
-            embed.add_field(
-                name="⏱️ Duração",
-                value=duration_text,
-                inline=True
-            )
+            if start and end:
+                duration_seconds = (end - start).total_seconds()
+                hours = int(duration_seconds // 3600)
+                minutes = int((duration_seconds % 3600) // 60)
+                duration_text = f"{hours}h {minutes}m" if hours > 0 else f"{minutes}m"
+                embed.add_field(
+                    name="⏱️ Duração",
+                    value=duration_text,
+                    inline=True
+                )
         except Exception as e:
             logger.debug(f"Erro ao calcular duração (result embed): {e}")
     
@@ -1300,7 +1295,7 @@ def create_result_embed(match_data: Dict, timezone: str = "America/Sao_Paulo") -
     
     # Footer com informações importantes
     # ✨ NOVO: Mostrar timezone configurado do servidor (versão híbrida)
-    tz_abbr = TimezoneManager.get_timezone_abbreviation(timezone)
+    tz_abbr = TimezoneManager.get_timezone_abbreviation(timezone, display_dt_local or now_local)
     tz_offset = TimezoneManager.get_timezone_offset(timezone)
     
     # Footer format: "Match ID: 123 • PandaScore API • BRT (UTC-3)"

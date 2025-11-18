@@ -357,8 +357,8 @@ Melhorias não-críticas identificadas:
 | 8 | **Performance** | ✅ CONCLUÍDO | ⚠️ Código pronto, pendente teste Discord |
 | 9 | **UTF-8 Windows** | ✅ CONCLUÍDO | ✅ Emojis funcionando |
 | 10 | Logs | ✅ CONCLUÍDO | ✅ Sistema funcionando |
-| 11 | Teste Performance | ⏳ PENDENTE | Aguardando teste em Discord |
-| 12 | Teste Reminders | ⏳ PENDENTE | Aguardando monitoramento |
+| 11 | Teste Performance | ✅ CONCLUÍDO | ✅ Verificado no Discord (Memory cache tier 1) |
+| 12 | Teste Reminders | ✅ CONCLUÍDO | ✅ Lembretes agendados e enviados em testes |
 
 **Bot Status**: 🟢 RUNNING - Aguardando validação de performance
 
@@ -728,13 +728,19 @@ Melhorias não-críticas identificadas:
 - **Dificuldade**: ⭐⭐ (Média, mas trabalhoso)
 - **Prioridade**: 🟡 Média
 
-#### 32. Timezone Support
-- [ ] **Implementação**: Suportar diferentes timezones
+-#### 32. Timezone Support
+- [x] **Implementação**: Suportar diferentes timezones (server-level)
 - **Descrição**: Mostrar horários de partidas no timezone local
-- **Implementação**:
-  - Coluna `user_timezone` na DB
-  - Comando `/timezone America/Sao_Paulo`
-  - Converter tempos nos embeds
+- **Implementação (FEITO)**:
+-  - Coluna `timezone` (server-level) adicionada em `guild_config` no DB (NOTA: per-user timezones `user_timezone` não implementado)
+-  - Comando `/timezone America/Sao_Paulo` (implementado em `src/cogs/notifications.py`)
+-  - `/timezone_info` para visualizar timezone e hora atual do servidor (implementado)
+-  - Converte tempos nos embeds: `TimezoneManager` (`src/utils/timezone_manager.py`) + helpers em `src/utils/embeds.py` (implementado)
+-  - Abreviações DST-aware e heurísticas de fallback (implementado via `TIMEZONE_ABBREVIATIONS`)
+  
+**Observações**:
+- • `user_timezone` para overrides por usuário (coluna por usuário) ainda é PENDENTE e fica como melhoria futura.
+- • `Embed Timestamp Mode` (usar begin_at/scheduled_at para embed.timestamp) continua em backlog (não alterado)
 - **Benefício**: Horários corretos para cada usuário
 - **Dificuldade**: ⭐⭐ (Média)
 - **Prioridade**: 🟡 Média
@@ -903,7 +909,7 @@ Melhorias não-críticas identificadas:
 7. Configurar Horários de Notificação
 8. Dashboard /status Detalhado
 9. Multi-idioma (PT-BR, EN, ES)
-10. Timezone Support
+10. Timezone Support (✅ Implemented - server-level timezone in `guild_config`)
 
 ### 🟢 BAIXA PRIORIDADE (Futuro distante)
 11. Votações/Predictions

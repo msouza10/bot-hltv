@@ -54,64 +54,103 @@ VALID_TIMEZONES = pytz.all_timezones
 # pytz.strftime("%Z") frequentemente retorna offset como "-03" ao invés de "BRT"
 # Essa tabela garante os nomes corretos
 TIMEZONE_ABBREVIATIONS = {
-    # Americas - Brasil
-    "America/Sao_Paulo": "BRT",      # Brazil Time (UTC-3)
-    "America/Fortaleza": "BRT",      # Brazil Time
-    "America/Araguaina": "BRT",      # Brazil Time
-    "America/Maceio": "BRT",         # Brazil Time
-    "America/Bahia": "BRT",          # Brazil Time
-    "America/Belem": "BRT",          # Brazil Time
-    "America/Manaus": "AMT",         # Amazon Time (UTC-4)
-    "America/Boa_Vista": "AMT",      # Amazon Time
-    "America/Anchorage": "AKDT",     # Alaska
-    
-    # Americas - USA
-    "America/New_York": "EST",       # Eastern Standard Time (UTC-5) / EDT (UTC-4)
-    "America/Chicago": "CST",        # Central Standard Time (UTC-6) / CDT (UTC-5)
-    "America/Denver": "MST",         # Mountain Standard Time (UTC-7) / MDT (UTC-6)
-    "America/Los_Angeles": "PST",    # Pacific Standard Time (UTC-8) / PDT (UTC-7)
-    
+    # 
+    # Americas (South/Latin America)
+    "America/Sao_Paulo": "BRT",
+    "America/Fortaleza": "BRT",
+    "America/Belem": "BRT",
+    "America/Maceio": "BRT",
+    "America/Bahia": "BRT",
+    "America/Araguaina": "BRT",
+    "America/Recife": "BRT",
+    "America/Noronha": "FNT",
+    "America/Manaus": "AMT",
+    "America/Boa_Vista": "AMT",
+    "America/Campo_Grande": "AMT",
+    "America/Eirunepe": "ACT",
+    "America/Rio_Branco": "ACT",
+    "America/Montevideo": "UYT",
+    "America/Asuncion": "PYT",
+    "America/La_Paz": "BOT",
+    "America/Santiago": "CLT",
+    "America/Bogota": "COT",
+    "America/Lima": "PET",
+
+    # North America (US/Canada/Mexico)
+    "America/New_York": {"std": "EST", "dst": "EDT"},
+    "America/Toronto": "EST",
+    "America/Chicago": {"std": "CST", "dst": "CDT"},
+    "America/Winnipeg": "CST",
+    "America/Denver": {"std": "MST", "dst": "MDT"},
+    "America/Phoenix": "MST",
+    "America/Edmonton": "MST",
+    "America/Los_Angeles": {"std": "PST", "dst": "PDT"},
+    "America/Vancouver": "PST",
+    "America/Mexico_City": "CST",
+    "America/Guatemala": "CST",
+
+    # Caribbean
+    "America/Havana": "CST",
+    "America/Santo_Domingo": "AST",
+
+    # Atlantic
+    "America/Halifax": "ADT",
+    "America/St_Johns": "NST",
+
     # Europe
-    "Europe/London": "GMT",          # Greenwich Mean Time (UTC+0)
-    "Europe/Paris": "CET",           # Central European Time (UTC+1)
-    "Europe/Berlin": "CET",          # Central European Time
-    "Europe/Madrid": "CET",          # Central European Time
-    "Europe/Amsterdam": "CET",       # Central European Time
-    "Europe/Brussels": "CET",        # Central European Time
-    "Europe/Vienna": "CET",          # Central European Time
-    "Europe/Rome": "CET",            # Central European Time
-    "Europe/Prague": "CET",          # Central European Time
-    "Europe/Budapest": "CET",        # Central European Time
-    "Europe/Warsaw": "CET",          # Central European Time
-    "Europe/Athens": "EET",          # Eastern European Time (UTC+2)
-    "Europe/Istanbul": "EET",        # Eastern European Time
-    "Europe/Moscow": "MSK",          # Moscow Standard Time (UTC+3)
-    "Europe/Dublin": "GMT",          # Greenwich Mean Time (same as London)
-    "Europe/Lisbon": "GMT",          # GMT/WET
-    "Europe/Stockholm": "CET",       # Central European Time
-    "Europe/Oslo": "CET",            # Central European Time
-    "Europe/Copenhagen": "CET",      # Central European Time
-    "Europe/Zurich": "CET",          # Central European Time
-    
+    "Europe/London": {"std": "GMT", "dst": "BST"},
+    "Europe/Dublin": "GMT",
+    "Europe/Lisbon": "WET",
+    "Europe/Paris": {"std": "CET", "dst": "CEST"},
+    "Europe/Berlin": {"std": "CET", "dst": "CEST"},
+    "Europe/Madrid": {"std": "CET", "dst": "CEST"},
+    "Europe/Amsterdam": {"std": "CET", "dst": "CEST"},
+    "Europe/Brussels": {"std": "CET", "dst": "CEST"},
+    "Europe/Vienna": "CET",
+    "Europe/Rome": "CET",
+    "Europe/Stockholm": "CET",
+    "Europe/Oslo": "CET",
+    "Europe/Copenhagen": "CET",
+    "Europe/Warsaw": "CET",
+    "Europe/Prague": "CET",
+    "Europe/Budapest": "CET",
+    "Europe/Athens": "EET",
+    "Europe/Istanbul": "TRT",
+    "Europe/Moscow": "MSK",
+
+    # Africa
+    "Africa/Johannesburg": "SAST",
+    "Africa/Cairo": "EET",
+    "Africa/Maputo": "CAT",
+    "Africa/Nairobi": "EAT",
+
     # Asia
-    "Asia/Tokyo": "JST",             # Japan Standard Time (UTC+9)
-    "Asia/Shanghai": "CST",          # China Standard Time (UTC+8)
-    "Asia/Hong_Kong": "HKT",         # Hong Kong Time (UTC+8)
-    "Asia/Singapore": "SGT",         # Singapore Time (UTC+8)
-    "Asia/Bangkok": "ICT",           # Indochina Time (UTC+7)
-    "Asia/Jakarta": "WIB",           # Western Indonesia Time (UTC+7)
-    "Asia/Seoul": "KST",             # Korea Standard Time (UTC+9)
-    "Asia/Dubai": "GST",             # Gulf Standard Time (UTC+4)
-    "Asia/Kolkata": "IST",           # Indian Standard Time (UTC+5:30)
-    
+    "Asia/Tokyo": "JST",
+    "Asia/Seoul": "KST",
+    "Asia/Shanghai": "CST",
+    "Asia/Hong_Kong": "HKT",
+    "Asia/Singapore": "SGT",
+    "Asia/Bangkok": "ICT",
+    "Asia/Jakarta": "WIB",
+    "Asia/Kuala_Lumpur": "MYT",
+    "Asia/Dubai": "GST",
+    "Asia/Kolkata": "IST",
+    "Asia/Kathmandu": "NPT",
+    "Asia/Ho_Chi_Minh": "ICT",
+
     # Oceania
-    "Australia/Sydney": "AEDT",      # Australian Eastern Daylight Time (UTC+11) / AEST (UTC+10)
-    "Australia/Melbourne": "AEDT",   # Australian Eastern Time
-    "Australia/Perth": "AWST",       # Australian Western Standard Time (UTC+8)
-    
-    # UTC
+    "Australia/Sydney": {"std": "AEST", "dst": "AEDT"},
+    "Australia/Melbourne": {"std": "AEST", "dst": "AEDT"},
+    "Australia/Brisbane": "AEST",
+    "Australia/Adelaide": "ACST",
+    "Australia/Perth": "AWST",
+    "Pacific/Auckland": "NZST",
+    "Pacific/Fiji": "FJT",
+
+    # Common UTC aliases
     "UTC": "UTC",
     "Etc/UTC": "UTC",
+    "GMT": "GMT",
 }
 
 
@@ -254,7 +293,7 @@ class TimezoneManager:
             return None
     
     @staticmethod
-    def get_timezone_abbreviation(timezone_name: str) -> str:
+    def get_timezone_abbreviation(timezone_name: str, dt: Optional[datetime] = None) -> str:
         """
         Retorna abreviação do timezone.
         
@@ -263,9 +302,11 @@ class TimezoneManager:
         
         Args:
             timezone_name: Nome do timezone
+            dt: Optional datetime to determine DST-aware abbreviation (if provided)
             
         Returns:
             str: Abreviação (ex: "BRT", "EST", "CET")
+            Note: `TIMEZONE_ABBREVIATIONS` entries may be either a string or a dict like {"std":"EST","dst":"EDT"}.
             
         Exemplo:
             >>> TimezoneManager.get_timezone_abbreviation("America/Sao_Paulo")
@@ -274,21 +315,34 @@ class TimezoneManager:
         if not TimezoneManager.is_valid_timezone(timezone_name):
             return "UTC"
         
-        # ✅ CORREÇÃO: Usar tabela manual ao invés de strftime("%Z")
-        # strftime("%Z") retorna "-03" para BRT ao invés de "BRT"
-        abbr = TIMEZONE_ABBREVIATIONS.get(timezone_name)
-        if abbr:
-            return abbr
-        
-        # Fallback: tentar usar strftime (pode retornar "-HH" em alguns casos)
+        # ✅ Use mapping as single source of truth for abbreviation
+        abbr_entry = TIMEZONE_ABBREVIATIONS.get(timezone_name)
+        if abbr_entry:
+            # If it's a simple string, return it
+            if isinstance(abbr_entry, str):
+                return abbr_entry
+            # If it's a dict with 'std'/'dst', decide based on dt (if present) or current time
+            if isinstance(abbr_entry, dict):
+                try:
+                    # If dt is not provided, use current time in the timezone
+                    tz = pytz.timezone(timezone_name)
+                    if dt is None:
+                        dt_local = datetime.now(tz)
+                    else:
+                        dt_local = dt.astimezone(tz)
+                    # choose DST if present
+                    dt_dst = dt_local.dst()
+                    if dt_dst and getattr(dt_dst, "total_seconds", lambda: 0)() != 0:
+                        return abbr_entry.get("dst") or abbr_entry.get("std") or "UTC"
+                    return abbr_entry.get("std") or list(abbr_entry.values())[0]
+                except Exception:
+                    # fallback to 'std' if anything fails
+                    return abbr_entry.get("std") or "UTC"
+
+        # If mapping is not found, fallback to UTC offset format as a clear indicator
         try:
-            tz = pytz.timezone(timezone_name)
-            now = datetime.now(tz)
-            result = now.strftime("%Z")
-            # Se retornar apenas offset, tentar tzname
-            if result.startswith("-") or result.startswith("+"):
-                result = now.tzname() or "UTC"
-            return result or "UTC"
+            offset = TimezoneManager.get_timezone_offset(timezone_name)
+            return offset if offset else "UTC"
         except Exception:
             return "UTC"
     
