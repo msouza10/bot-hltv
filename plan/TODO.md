@@ -807,6 +807,17 @@ Melhorias não-críticas identificadas:
 - **Dificuldade**: ⭐⭐⭐ (Difícil)
 - **Prioridade**: 🟡 Média
 
+#### 39. Embed Timestamp Mode (Future)
+- [ ] **Implementação**: Adicionar opção/config para usar `embed.timestamp` como hora da partida (begin_at/scheduled_at/modified_at) ao invés do horário da mensagem
+- **Descrição**: Atualmente `embed.timestamp` mostra o momento da mensagem (boa UX). Em alguns casos precisamos que ela mostre a hora da partida para que o timestamp "relative" do Discord (ex: Hoje às 19:00) aponte para o momento da partida.
+- **Implementação**: 
+  - Criar config global/guild-level para escolher o comportamento
+  - Adicionar flag `embed_timestamp_use_match_time` em `guild_config`
+  - Ajustar `create_*_embed()` para usar essa flag e aplicar `display_dt_local` quando ativado
+  - Adicionar testes unitários para ambos os modos
+- **Benefício**: Flexibilidade entre mostrar hora da mensagem (default) e hora da partida (se preferido).
+- **Dificuldade**: ⭐⭐ (Média)
+
 #### 39. Load Testing
 - [ ] **Implementação**: Testar bot com muitos usuários
 - **O quê testar**:

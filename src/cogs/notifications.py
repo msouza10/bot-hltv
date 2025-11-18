@@ -311,6 +311,276 @@ class NotificationsCog(commands.Cog):
                 color=nextcord.Color.red()
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    @nextcord.slash_command(
+        name="timezone_info",
+        description="Mostra qual timezone (fuso horário) está configurado para o servidor"
+    )
+    async def timezone_info(self, interaction: nextcord.Interaction):
+        """
+        Exibe o timezone atualmente configurado do servidor.
+        """
+        try:
+            guild_id = interaction.guild_id
+            
+            # Obter timezone do cache_manager
+            timezone = await self.bot.cache_manager.get_guild_timezone(guild_id)
+            
+            if not timezone:
+                # Se não tem timezone configurado, mostrar mensagem informativa
+                embed = nextcord.Embed(
+                    title="🌍 Timezone Não Configurado",
+                    description="Este servidor ainda não tem um timezone configurado.",
+                    color=nextcord.Color.orange()
+                )
+                
+                embed.add_field(
+                    name="📌 O que fazer?",
+                    value="""
+                    Use o comando `/timezone` para configurar o timezone do seu servidor.
+                    
+                    Exemplo:
+                    `/timezone fuso_horario: America/Sao_Paulo`
+                    """,
+                    inline=False
+                )
+                
+                embed.add_field(
+                    name="ℹ️ Por que configurar?",
+                    value="""
+                    • Todos os horários das partidas serão exibidos no timezone do seu servidor
+                    • As notificações serão enviadas no horário correto
+                    • Os lembretes respeitarão sua zona horária
+                    """,
+                    inline=False
+                )
+                
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+                logger.info(f"🌍 /timezone_info: Timezone não configurado para guild {guild_id}")
+                return
+            
+            from src.utils.timezone_manager import TimezoneManager
+            
+            # Obter informações do timezone
+            tz_abbr = TimezoneManager.get_timezone_abbreviation(timezone)
+            tz_offset = TimezoneManager.get_timezone_offset(timezone)
+            tz_emoji = TimezoneManager.get_server_timezone_emoji(timezone)
+            
+            # Obter hora atual neste timezone
+            import datetime
+            import pytz
+            
+            tz_obj = pytz.timezone(timezone)
+            current_time = datetime.datetime.now(tz_obj)
+            current_time_str = current_time.strftime("%H:%M:%S")
+            current_date_str = current_time.strftime("%d/%m/%Y")
+            
+            embed = nextcord.Embed(
+                title="🌍 Timezone do Servidor",
+                description=f"Este servidor está usando **{timezone}**",
+                color=nextcord.Color.blue()
+            )
+            
+            embed.add_field(
+                name="📍 Informações do Timezone",
+                value=f"""
+                **Timezone:** {timezone}
+                **Abreviação:** {tz_abbr}
+                **Offset UTC:** {tz_offset}
+                **Emoji:** {tz_emoji}
+                """,
+                inline=False
+            )
+            
+            embed.add_field(
+                name="⏰ Hora Atual neste Timezone",
+                value=f"""
+                **Data:** {current_date_str}
+                **Horário:** {current_time_str} {tz_abbr}
+                """,
+                inline=False
+            )
+            
+            embed.add_field(
+                name="📋 O que você vê?",
+                value=f"""
+                • **Partidas:** Convertidas para {tz_abbr}
+                • **Notificações:** Enviadas no horário {tz_abbr}
+                • **Lembretes:** Usando {tz_abbr}
+                • **API:** Continua usando UTC internamente
+                """,
+                inline=False
+            )
+            
+            embed.add_field(
+                name="🔧 Alterar Timezone",
+                value="Use `/timezone` para mudar o timezone do servidor.",
+                inline=False
+            )
+            
+            embed.set_footer(text="Bot HLTV - Timezone Info")
+            
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            
+            logger.info(f"🌍 /timezone_info: Timezone do servidor = {timezone} (Guild: {guild_id})")
+            
+        except Exception as e:
+            logger.error(f"Erro ao exibir timezone_info: {e}")
+            embed = nextcord.Embed(
+                title="❌ Erro",
+                description=f"Erro ao exibir informações de timezone: {str(e)}",
+                color=nextcord.Color.red()
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @nextcord.slash_command(
+        name="timezone",
+        description="Configura o timezone (fuso horário) do servidor para exibição de horários"
+    )
+    async def timezone(
+        self,
+        interaction: nextcord.Interaction,
+        fuso_horario: str = SlashOption(
+            name="fuso_horario",
+            description="Ex: America/Sao_Paulo, Europe/London, Asia/Tokyo",
+            required=True
+        )
+    ):
+        """
+        Configura o timezone (fuso horário) do servidor.
+        
+        Exemplos:
+        - Brazil: America/Sao_Paulo
+        - USA: America/New_York
+        - Europe: Europe/London, Europe/Paris
+        - Asia: Asia/Tokyo, Asia/Shanghai
+        """
+        
+        # Verificar permissões
+        if not interaction.user.guild_permissions.administrator:
+            embed = nextcord.Embed(
+                title="❌ Permissão Negada",
+                description="Apenas administradores podem configurar o timezone.",
+                color=nextcord.Color.red()
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+        
+        from src.utils.timezone_manager import TimezoneManager
+        
+        # Validar timezone
+        if not TimezoneManager.is_valid_timezone(fuso_horario):
+            # Mostrar sugestões
+            suggestions = """
+            **Timezones válidos (exemplos):**
+            
+            🇧🇷 **Brasil:** America/Sao_Paulo
+            🇺🇸 **EUA - East:** America/New_York
+            🇺🇸 **EUA - Chicago:** America/Chicago
+            🇺🇸 **EUA - Denver:** America/Denver
+            🇺🇸 **EUA - West:** America/Los_Angeles
+            
+            🇬🇧 **UK:** Europe/London
+            🇫🇷 **França:** Europe/Paris
+            🇩🇪 **Alemanha:** Europe/Berlin
+            🇷🇺 **Rússia:** Europe/Moscow
+            
+            🇯🇵 **Japão:** Asia/Tokyo
+            🇨🇳 **China:** Asia/Shanghai
+            🇮🇳 **Índia:** Asia/Kolkata
+            🇸🇬 **Singapura:** Asia/Singapore
+            🇦🇺 **Austrália:** Australia/Sydney
+            
+            Para mais timezones, visite: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
+            """
+            
+            embed = nextcord.Embed(
+                title="❌ Timezone Inválido",
+                description=f"'{fuso_horario}' não é um timezone válido.\n\n{suggestions}",
+                color=nextcord.Color.red()
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+        
+        guild_id = interaction.guild_id
+        
+        try:
+            client = await self.bot.cache_manager.get_client()
+            
+            # Garantir que existe registro de configuração
+            await client.execute(
+                """
+                INSERT OR IGNORE INTO guild_config (guild_id, timezone)
+                VALUES (?, ?)
+                """,
+                [guild_id, fuso_horario]
+            )
+            
+            # Atualizar timezone
+            await client.execute(
+                """
+                UPDATE guild_config 
+                SET timezone = ?
+                WHERE guild_id = ?
+                """,
+                [fuso_horario, guild_id]
+            )
+            
+            # Obter informações do novo timezone
+            tz_abbr = TimezoneManager.get_timezone_abbreviation(fuso_horario)
+            tz_offset = TimezoneManager.get_timezone_offset(fuso_horario)
+            tz_emoji = TimezoneManager.get_server_timezone_emoji(fuso_horario)
+            
+            embed = nextcord.Embed(
+                title="✅ Timezone Configurado",
+                description=f"Horários agora serão exibidos em **{fuso_horario}**",
+                color=nextcord.Color.green()
+            )
+            
+            embed.add_field(
+                name="📍 Informações",
+                value=f"""
+                **Timezone:** {fuso_horario}
+                **Abreviação:** {tz_abbr}
+                **Offset:** {tz_offset}
+                **Emoji:** {tz_emoji}
+                """,
+                inline=False
+            )
+            
+            embed.add_field(
+                name="⏰ Exemplo",
+                value=f"""
+                Quando for 15:00 UTC (horário da API):
+                Será exibido como: (convertido para seu timezone)
+                """,
+                inline=False
+            )
+            
+            embed.add_field(
+                name="📌 Informações",
+                value="""
+                • Todos os dados continuam em UTC no banco de dados
+                • Conversão acontece apenas na EXIBIÇÃO
+                • Se alterar o timezone, novas partidas usarão o novo horário
+                • Partidas já agendadas usarão o timezone antigo""",
+                inline=False
+            )
+            
+            embed.set_footer(text="Bot HLTV - Timezone Configuration")
+            
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            
+            logger.info(f"✓ Timezone configurado para {fuso_horario} na guild {guild_id}")
+            
+        except Exception as e:
+            logger.error(f"Erro ao configurar timezone: {e}")
+            embed = nextcord.Embed(
+                title="❌ Erro",
+                description=f"Erro ao configurar timezone: {str(e)}",
+                color=nextcord.Color.red()
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 def setup(bot):

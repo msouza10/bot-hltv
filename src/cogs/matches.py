@@ -40,6 +40,10 @@ class MatchesCog(commands.Cog):
         await interaction.response.defer()
         
         try:
+            # 🌍 Obter timezone do guild
+            timezone = await self.bot.cache_manager.get_guild_timezone(interaction.guild_id) or "America/Sao_Paulo"
+            logger.info(f"🌍 /partidas: Timezone do servidor = {timezone}")
+            
             # Primeiro: tentar cache em memória (muito rápido!)
             matches = await self.bot.cache_manager.get_cached_matches_fast("upcoming", quantidade)
             
@@ -76,7 +80,7 @@ class MatchesCog(commands.Cog):
                     if isinstance(match, Exception):
                         logger.error(f"Erro ao augmentar match: {match}")
                         continue
-                    embed = create_match_embed(match)
+                    embed = create_match_embed(match, timezone=timezone)
                     embeds.append(embed)
                 except Exception as e:
                     logger.error(f"Erro ao criar embed: {e}")
@@ -84,7 +88,8 @@ class MatchesCog(commands.Cog):
             if not embeds:
                 embed = create_error_embed(
                     "Erro ao processar partidas",
-                    "Não foi possível processar as informações das partidas."
+                    "Não foi possível processar as informações das partidas.",
+                    timezone=timezone  # ✅ NOVO
                 )
                 await interaction.followup.send(embed=embed)
                 return
@@ -101,7 +106,8 @@ class MatchesCog(commands.Cog):
             logger.error(f"✗ Erro no comando /partidas: {e}")
             embed = create_error_embed(
                 "Erro ao buscar partidas",
-                f"Ocorreu um erro ao consultar o cache: {str(e)}"
+                f"Ocorreu um erro ao consultar o cache: {str(e)}",
+                timezone=timezone  # ✅ NOVO
             )
             await interaction.followup.send(embed=embed)
     
@@ -114,6 +120,9 @@ class MatchesCog(commands.Cog):
         await interaction.response.defer()
         
         try:
+            # 🌍 Obter timezone do guild
+            timezone = await self.bot.cache_manager.get_guild_timezone(interaction.guild_id) or "America/Sao_Paulo"
+            logger.info(f"🌍 /aovivo: Timezone do servidor = {timezone}")
             # Primeiro: tentar cache em memória (muito rápido!)
             matches = await self.bot.cache_manager.get_cached_matches_fast("running", 10)
             
@@ -133,7 +142,8 @@ class MatchesCog(commands.Cog):
             if not matches:
                 embed = create_info_embed(
                     "Nenhuma partida ao vivo",
-                    "Não há partidas acontecendo no momento."
+                    "Não há partidas acontecendo no momento.",
+                    timezone=timezone  # ✅ NOVO
                 )
                 await interaction.followup.send(embed=embed)
                 return
@@ -150,7 +160,7 @@ class MatchesCog(commands.Cog):
                     if isinstance(match, Exception):
                         logger.error(f"Erro ao augmentar match: {match}")
                         continue
-                    embed = create_match_embed(match)
+                    embed = create_match_embed(match, timezone=timezone)
                     embeds.append(embed)
                 except Exception as e:
                     logger.error(f"Erro ao criar embed: {e}")
@@ -167,7 +177,8 @@ class MatchesCog(commands.Cog):
             logger.error(f"✗ Erro no comando /aovivo: {e}")
             embed = create_error_embed(
                 "Erro ao buscar partidas",
-                f"Ocorreu um erro: {str(e)}"
+                f"Ocorreu um erro: {str(e)}",
+                timezone=timezone  # ✅ NOVO
             )
             await interaction.followup.send(embed=embed)
     
@@ -199,6 +210,9 @@ class MatchesCog(commands.Cog):
         await interaction.response.defer()
         
         try:
+            # 🌍 Obter timezone do guild
+            timezone = await self.bot.cache_manager.get_guild_timezone(interaction.guild_id) or "America/Sao_Paulo"
+            logger.info(f"🌍 /resultados: Timezone do servidor = {timezone}")
             # Primeiro: tentar cache em memória (muito rápido!)
             matches = await self.bot.cache_manager.get_cached_matches_fast("finished", quantidade)
             
@@ -240,7 +254,7 @@ class MatchesCog(commands.Cog):
                         logger.error(f"Erro ao augmentar match: {match}")
                         continue
                     # Usar função otimizada para resultados
-                    embed = create_result_embed(match)
+                    embed = create_result_embed(match, timezone=timezone)
                     embeds.append(embed)
                 except Exception as e:
                     logger.error(f"Erro ao criar embed: {e}")
@@ -257,7 +271,8 @@ class MatchesCog(commands.Cog):
             logger.error(f"✗ Erro no comando /resultados: {e}")
             embed = create_error_embed(
                 "Erro ao buscar resultados",
-                f"Ocorreu um erro: {str(e)}"
+                f"Ocorreu um erro: {str(e)}",
+                timezone=timezone  # ✅ NOVO
             )
             await interaction.followup.send(embed=embed)
 

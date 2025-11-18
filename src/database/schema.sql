@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS guild_config (
     notify_live BOOLEAN DEFAULT 1,
     notify_results BOOLEAN DEFAULT 0,
     language TEXT DEFAULT 'pt-BR',
+    timezone TEXT DEFAULT 'America/Sao_Paulo',  -- ✨ NEW: Timezone do servidor
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

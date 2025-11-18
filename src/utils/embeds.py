@@ -5,6 +5,12 @@ Utilitários para criar embeds formatados do Discord (usando Nextcord).
 import nextcord
 from datetime import datetime
 from typing import Optional, List, Dict
+import pytz
+import logging
+import re
+
+# Importar TimezoneManager para suporte a timezone
+from .timezone_manager import TimezoneManager
 
 
 # Mapa de bandeiras por idioma (70+ idiomas suportados)
@@ -589,16 +595,108 @@ def format_streams_field(
     return "\n".join(result_lines)
 
 
-def create_match_embed(match_data: Dict) -> nextcord.Embed:
+def _get_display_datetime_for_match(match_data: Dict, timezone: str) -> Optional[datetime]:
+    """
+    Retorna o datetime local (timezone-aware) a ser exibido para a partida.
+    Prioridade: begin_at -> scheduled_at -> modified_at
+    """
+    logger = logging.getLogger(__name__)
+    candidates = [match_data.get("begin_at"), match_data.get("scheduled_at"), match_data.get("modified_at")]
+    for raw in candidates:
+        if not raw:
+            continue
+        try:
+            dt_utc = TimezoneManager.parse_iso_datetime(raw)
+            if not dt_utc:
+                continue
+            tz = pytz.timezone(timezone)
+            return dt_utc.astimezone(tz)
+        except Exception as e:
+            logger.debug(f"Erro ao analisar campo de data '{raw}': {e}")
+            continue
+    return None
+
+
+def _resolve_tz_abbr_and_offset(timezone: str, dt_local: Optional[datetime] = None) -> tuple:
+    """
+    Retorna (abbr, offset_str) confiáveis para timezone/instante fornecido.
+    Abbreviation: preferência por TimezoneManager.get_timezone_abbreviation() e heurísticas.
+    Offset: formato 'UTC±N' calculado a partir do datetime local quando disponível.
+    """
+    logger = logging.getLogger(__name__)
+    abbr = None
+    offset_str = None
+
+    if dt_local:
+        try:
+            abbr = dt_local.tzname()
+        except Exception as e:
+            logger.debug(f"Erro obtendo tzname de dt_local: {e}")
+            abbr = None
+
+    if not abbr:
+        try:
+            abbr = TimezoneManager.get_timezone_abbreviation(timezone)
+        except Exception as e:
+            logger.debug(f"TimezoneManager.get_timezone_abbreviation erro: {e}")
+            abbr = None
+
+    # Normalize if it's an offset like '-03' or '+02'
+    if abbr and re.match(r"^[-+]?\d+$", abbr):
+        common_map = {
+            "America/Sao_Paulo": "BRT",
+            "America/New_York": "EST",
+            "Europe/London": "GMT",
+            "Asia/Tokyo": "JST",
+            "Europe/Paris": "CET",
+            "UTC": "UTC",
+        }
+        abbr = common_map.get(timezone, f"UTC{int(abbr):+d}")
+
+    if dt_local:
+        try:
+            offset = dt_local.utcoffset()
+            if offset is not None:
+                total_seconds = int(offset.total_seconds())
+                hours = total_seconds // 3600
+                minutes = (abs(total_seconds) % 3600) // 60
+                sign = "+" if hours >= 0 else "-"
+                hours_abs = abs(hours)
+                if minutes:
+                    offset_str = f"UTC{sign}{hours_abs}:{minutes:02d}"
+                else:
+                    offset_str = f"UTC{sign}{hours_abs}"
+        except Exception as e:
+            logger.debug(f"Erro ao calcular utcoffset de dt_local: {e}")
+
+    if not offset_str:
+        try:
+            offset_str = TimezoneManager.get_timezone_offset(timezone)
+        except Exception as e:
+            logger.debug(f"TimezoneManager.get_timezone_offset erro: {e}")
+            offset_str = "UTC+0"
+
+    if not abbr:
+        abbr = "UTC"
+
+    return abbr, offset_str
+
+
+
+def create_match_embed(match_data: Dict, timezone: str = "America/Sao_Paulo") -> nextcord.Embed:
     """
     Cria um embed formatado para exibir informações de uma partida.
     
     Args:
         match_data: Dados da partida retornados pela PandaScore API
+        timezone: Timezone para exibição de horários (default: America/Sao_Paulo)
         
     Returns:
         Embed do Discord formatado
     """
+    logger = logging.getLogger(__name__)
+    logger.debug(f"📍 create_match_embed usando timezone: {timezone}")
+    
     # Detectar se é partida futura (para avisar sobre streams)
     status = match_data.get("status", "unknown")
     is_upcoming = status == "not_started"
@@ -648,11 +746,15 @@ def create_match_embed(match_data: Dict) -> nextcord.Embed:
     }
     emoji = status_emoji.get(status, "📋")
     
+    # ✨ NOVO: Criar datetime com timezone awareness (versão híbrida)
+    tz = pytz.timezone(timezone)
+    now_local = datetime.now(tz)
+    
     # Criar embed
     embed = nextcord.Embed(
         title=f"{emoji} {team1_name} vs {team2_name}",
         color=color,
-        timestamp=datetime.utcnow()
+        timestamp=now_local  # ✅ Com timezone info
     )
     
     # Adicionar campos
@@ -698,23 +800,26 @@ def create_match_embed(match_data: Dict) -> nextcord.Embed:
         inline=True
     )
     
-    # Horário agendado (usar begin_at como fallback se scheduled_at for null)
-    time_to_display = scheduled_at or begin_at
-    if time_to_display:
+    # ⏰ Horário agendado da partida (com timezone)
+    display_dt_local = _get_display_datetime_for_match(match_data, timezone)
+    if display_dt_local:
         try:
-            dt = datetime.fromisoformat(time_to_display.replace("Z", "+00:00"))
-            timestamp_discord = f"<t:{int(dt.timestamp())}:F>"
+            tz_abbr, tz_offset = _resolve_tz_abbr_and_offset(timezone, display_dt_local)
+            weekday_names = {0: "Segunda", 1: "Terça", 2: "Quarta", 3: "Quinta", 4: "Sexta", 5: "Sábado", 6: "Domingo"}
+            weekday = weekday_names.get(display_dt_local.weekday(), "??")
+            time_str = display_dt_local.strftime("%H:%M")
+            date_str = display_dt_local.strftime("%d/%m")
+
+            # Format: "Terça 18/11 às 19:07 BRT (UTC-3)"
+            horario_value = f"{weekday} {date_str} às {time_str} {tz_abbr} ({tz_offset})"
+
             embed.add_field(
                 name="⏰ Horário",
-                value=timestamp_discord,
-                inline=False
+                value=horario_value,
+                inline=True
             )
-        except:
-            embed.add_field(
-                name="⏰ Horário",
-                value=time_to_display,
-                inline=False
-            )
+        except Exception as e:
+            logger.debug(f"Erro ao formatar horário (match embed): {e}")
     
     # Resultados (se finalizada)
     if status == "finished":
@@ -767,19 +872,19 @@ def create_match_embed(match_data: Dict) -> nextcord.Embed:
         end_at = match_data.get("end_at")
         if scheduled_at and end_at:
             try:
-                start = datetime.fromisoformat(scheduled_at.replace("Z", "+00:00"))
-                end = datetime.fromisoformat(end_at.replace("Z", "+00:00"))
-                duration = end - start
-                hours = duration.seconds // 3600
-                minutes = (duration.seconds % 3600) // 60
+                start = TimezoneManager.parse_iso_datetime(scheduled_at)
+                end = TimezoneManager.parse_iso_datetime(end_at)
+                duration_seconds = (end - start).total_seconds()
+                hours = int(duration_seconds // 3600)
+                minutes = int((duration_seconds % 3600) // 60)
                 duration_text = f"{hours}h {minutes}m" if hours > 0 else f"{minutes}m"
                 embed.add_field(
                     name="⏱️ Duração",
                     value=duration_text,
                     inline=True
                 )
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Erro ao calcular duração (match embed): {e}")
     
     # NOVO: Streams disponíveis
     # Nota: Isso será preenchido pelo código que chama create_match_embed
@@ -839,22 +944,35 @@ def create_match_embed(match_data: Dict) -> nextcord.Embed:
     if league_image:
         embed.set_image(url=league_image)
     
-    embed.set_footer(text=f"Match ID: {match_id} • PandaScore API")
+    # Footer com informações importantes
+    # ✨ NOVO: Mostrar timezone configurado do servidor (versão híbrida)
+    tz_abbr = TimezoneManager.get_timezone_abbreviation(timezone)
+    tz_offset = TimezoneManager.get_timezone_offset(timezone)
+    
+    # Footer format: "Match ID: 123 • PandaScore API • BRT (UTC-3)"
+    # O timestamp do Discord já mostra "Hoje às HH:MM" automaticamente!
+    footer_text = f"Match ID: {match_id} • PandaScore API • {tz_abbr} ({tz_offset})"
+    
+    embed.set_footer(text=footer_text)
     
     return embed
 
 
-def create_result_embed(match_data: Dict) -> nextcord.Embed:
+def create_result_embed(match_data: Dict, timezone: str = "America/Sao_Paulo") -> nextcord.Embed:
     """
     Cria um embed otimizado para RESULTADOS de partidas finalizadas.
     Mostra o máximo de informações disponíveis da API.
     
     Args:
         match_data: Dados da partida finalizada
+        timezone: Timezone para exibição de horários (default: America/Sao_Paulo)
         
     Returns:
         Embed com resultado completo
     """
+    logger = logging.getLogger(__name__)
+    logger.debug(f"📍 create_result_embed usando timezone: {timezone}")
+    
     match_id = match_data.get("id", "N/A")
     status = match_data.get("status", "finished")
     scheduled_at = match_data.get("scheduled_at")
@@ -898,10 +1016,14 @@ def create_result_embed(match_data: Dict) -> nextcord.Embed:
         color = 0x2ecc71  # Verde para finalizado
         emoji = "✅"
     
+    # ✨ NOVO: Criar datetime com timezone awareness (versão híbrida)
+    tz = pytz.timezone(timezone)
+    now_local = datetime.now(tz)
+    
     # Embed
     embed = nextcord.Embed(
         color=color,
-        timestamp=datetime.utcnow()
+        timestamp=now_local  # ✅ Com timezone info
     )
     
     # IMPORTANTE: Verificar se é cancelado - se sim, não mostrar placar fake (0-0)
@@ -977,17 +1099,26 @@ def create_result_embed(match_data: Dict) -> nextcord.Embed:
         inline=True
     )
     
-    if scheduled_at:
+    # ⏰ Horário da partida (com timezone)
+    display_dt_local = _get_display_datetime_for_match(match_data, timezone)
+    if display_dt_local:
         try:
-            dt = datetime.fromisoformat(scheduled_at.replace("Z", "+00:00"))
-            timestamp_discord = f"<t:{int(dt.timestamp())}:f>"
+            tz_abbr, tz_offset = _resolve_tz_abbr_and_offset(timezone, display_dt_local)
+            weekday_names = {0: "Segunda", 1: "Terça", 2: "Quarta", 3: "Quinta", 4: "Sexta", 5: "Sábado", 6: "Domingo"}
+            weekday = weekday_names.get(display_dt_local.weekday(), "??")
+            time_str = display_dt_local.strftime("%H:%M")
+            date_str = display_dt_local.strftime("%d/%m")
+
+            # Format: "Terça 18/11 às 19:07 BRT (UTC-3)"
+            horario_value = f"{weekday} {date_str} às {time_str} {tz_abbr} ({tz_offset})"
+
             embed.add_field(
-                name="📅 Data",
-                value=timestamp_discord,
+                name="⏰ Horário",
+                value=horario_value,
                 inline=True
             )
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Erro ao formatar horário (result embed): {e}")
     
     # Placar detalhado - usar results do level superior (não maps individuais)
     # PandaScore não retorna map.name nos dados, mas retorna results com placar final
@@ -1039,19 +1170,19 @@ def create_result_embed(match_data: Dict) -> nextcord.Embed:
     # Duração da partida (APENAS se não foi cancelado e tem timestamps)
     if status != "canceled" and begin_at and end_at:
         try:
-            start = datetime.fromisoformat(begin_at.replace("Z", "+00:00"))
-            end = datetime.fromisoformat(end_at.replace("Z", "+00:00"))
-            duration = end - start
-            hours = duration.seconds // 3600
-            minutes = (duration.seconds % 3600) // 60
+            start = TimezoneManager.parse_iso_datetime(begin_at)
+            end = TimezoneManager.parse_iso_datetime(end_at)
+            duration_seconds = (end - start).total_seconds()
+            hours = int(duration_seconds // 3600)
+            minutes = int((duration_seconds % 3600) // 60)
             duration_text = f"{hours}h {minutes}m" if hours > 0 else f"{minutes}m"
             embed.add_field(
                 name="⏱️ Duração",
                 value=duration_text,
                 inline=True
             )
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Erro ao calcular duração (result embed): {e}")
     
     # Status especial (cancelado, adiado, etc)
     if status != "finished":
@@ -1168,57 +1299,65 @@ def create_result_embed(match_data: Dict) -> nextcord.Embed:
         embed.set_image(url=league_image)
     
     # Footer com informações importantes
-    footer_text = f"ID: {match_id}"
+    # ✨ NOVO: Mostrar timezone configurado do servidor (versão híbrida)
+    tz_abbr = TimezoneManager.get_timezone_abbreviation(timezone)
+    tz_offset = TimezoneManager.get_timezone_offset(timezone)
     
-    # Adicionar timestamp no footer se disponível
-    if status == "finished" and begin_at:
-        try:
-            start = datetime.fromisoformat(begin_at.replace("Z", "+00:00"))
-            footer_text += f" • {start.strftime('%d/%m %H:%M')} UTC"
-        except:
-            pass
+    # Footer format: "Match ID: 123 • PandaScore API • BRT (UTC-3)"
+    # O timestamp do Discord já mostra "Hoje às HH:MM" automaticamente!
+    footer_text = f"Match ID: {match_id} • PandaScore API • {tz_abbr} ({tz_offset})"
     
     embed.set_footer(text=footer_text)
     
     return embed
 
 
-def create_error_embed(title: str, description: str) -> nextcord.Embed:
+def create_error_embed(title: str, description: str, timezone: str = "America/Sao_Paulo") -> nextcord.Embed:
     """
     Cria um embed de erro formatado.
     
     Args:
         title: Título do erro
         description: Descrição do erro
+        timezone: Timezone do servidor (default: America/Sao_Paulo)
         
     Returns:
         Embed de erro
     """
+    # ✨ NOVO: Criar datetime com timezone awareness (versão híbrida)
+    tz = pytz.timezone(timezone)
+    now_local = datetime.now(tz)
+    
     embed = nextcord.Embed(
         title=f"❌ {title}",
         description=description,
         color=0xe74c3c,  # Vermelho
-        timestamp=datetime.utcnow()
+        timestamp=now_local  # ✅ Com timezone info
     )
     return embed
 
 
-def create_info_embed(title: str, description: str) -> nextcord.Embed:
+def create_info_embed(title: str, description: str, timezone: str = "America/Sao_Paulo") -> nextcord.Embed:
     """
     Cria um embed informativo.
     
     Args:
         title: Título
         description: Descrição
+        timezone: Timezone do servidor (default: America/Sao_Paulo)
         
     Returns:
         Embed informativo
     """
+    # ✨ NOVO: Criar datetime com timezone awareness (versão híbrida)
+    tz = pytz.timezone(timezone)
+    now_local = datetime.now(tz)
+    
     embed = nextcord.Embed(
         title=f"ℹ️ {title}",
         description=description,
         color=0x3498db,  # Azul
-        timestamp=datetime.utcnow()
+        timestamp=now_local  # ✅ Com timezone info
     )
     return embed
 

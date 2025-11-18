@@ -1,43 +1,65 @@
 # AI Agent Instructions for bot-hltv
 
-**Project**: Discord bot for CS2 (Counter-Strike 2) match notifications via PandaScore API  
-**Stack**: Python 3.10+, Nextcord, libSQL (Turso), APScheduler  
-**Status**: Production-ready MVP with 24h/1h/live/result notifications
+**Project**: Discord bot for CS2 (Counter-Strike 2) match notifications with live stream detection via PandaScore API  
+**Stack**: Python 3.10+, Nextcord, libSQL (Turso), APScheduler, Twitch/YouTube APIs  
+**Status**: Production-ready with 42h temporal cache, multi-stream support, and result notifications
 
 ## Architecture Overview
 
 ### High-Level Data Flow
 
 ```
-PandaScore API → pandascore_service.py → cache_scheduler.py → 
-  ↓
-libSQL Cache (3-tier: memory → DB → API fallback) → embeds.py → 
-  ↓
-NotificationManager (reminder scheduling) → Discord Guild Channels
+PandaScore API ──→ pandascore_service.py ──→ cache_scheduler.py
+      ↓                                             ↓
+streams_list                        cache_matches() + cache_streams()
+      ↓                                             ↓
+{twitch, kick, youtube, ...} ──→ temporal_cache.py (42h window)
+                                     ↓
+                        libSQL Cache (match_streams table)
+                                     ↓
+augment_match_with_streams() ──→ embeds.py (with 📡 Streams field)
+                                     ↓
+NotificationManager (5-point reminders + result notifications)
+                                     ↓
+                        Discord Guild Channels
 ```
 
-**Key insight**: The system uses hierarchical caching to minimize API calls while keeping Discord interactions fast (<3s timeout).
+**Key insights**:
+- **Temporal coverage**: 42-hour sliding window ensures consistent data freshness
+- **Stream integration**: Automatic detection from PandaScore `streams_list` API field
+- **3-tier cache**: Memory (fast) → DB (persistent) → API fallback (graceful degradation)
+- **Parallel augmentation**: Matches augmented with streams concurrently before embed creation
+- **Fast interactions**: <3s timeout enforced, memory cache prioritized
 
 ### Core Components
 
-1. **bot.py**: Entry point. Initializes PandaScoreClient, MatchCacheManager, CacheScheduler, and NotificationManager in sequence. Loads cogs dynamically.
+1. **bot.py**: Entry point. Initializes in order: PandaScoreClient → MatchCacheManager → NotificationManager → CacheScheduler. Loads cogs and manages Discord lifecycle.
 
-2. **pandascore_service.py**: Async HTTP client wrapping CS2 endpoints (`/upcoming`, `/running`, `/past?filter=finished`, `/past?filter=canceled`). Handles rate limiting (1000 req/h) and connection pooling.
+2. **pandascore_service.py**: Async HTTP client for CS2 endpoints (`/upcoming`, `/running`, `/past?filter=finished`, `/past?filter=canceled`). Returns match objects with **`streams_list` array** for each match. Rate limit: 1000 req/h with exponential backoff.
 
-3. **cache_scheduler.py**: Discord Tasks-based scheduler running two async loops:
-   - `update_all_matches()`: Every 15 min (fetches 50 upcoming + 2 running + 20 finished)
+3. **cache_scheduler.py**: Discord Tasks-based scheduler running:
+   - `update_all_matches()`: Every 15 min (50 upcoming + 2 running + 20 finished)
    - `update_live_matches()`: Every 5 min (only running matches)
+   - Ensures matches stay within **42-hour temporal window** via `temporal_cache.py`
 
-4. **cache_manager.py**: libSQL operations with async lock for race condition prevention. Memory cache stores recent results separately (`_memory_cache` dict).
+4. **cache_manager.py**: libSQL async operations with locks for race conditions. Implements dual cache:
+   - `get_cached_matches_fast()`: In-memory dict (<100ms)
+   - `get_cached_matches()`: DB queries with indices (<3s)
+   - New: `cache_streams()`, `get_match_streams()` for stream persistence
 
-5. **notification_manager.py**: Schedules reminders at [60, 30, 15, 5, 0] minutes before match start. Uses `match_reminders` table to track state and avoid duplicates.
+5. **temporal_cache.py**: Maintains 42-hour sliding window. Queries `begin_at` field to keep cache relevant without manual cleanup.
 
-6. **cogs/{matches, notifications, ping}.py**: Slash commands (`/partidas`, `/aovivo`, `/resultados`, `/notificacoes`).
+6. **{twitch_search_service, youtube_service}.py**: Optional enrichment for Twitch/YouTube stream metadata (used when `streams_list` is sparse).
+
+7. **notification_manager.py**: Schedules reminders at [60, 30, 15, 5, 0] minutes before match. Fetches augmented matches with streams for reminder embeds.
+
+8. **cogs/{matches, notifications, ping}.py**: Slash commands (`/partidas`, `/aovivo`, `/resultados`, `/notificacoes`). All commands call `augment_match_with_streams()` before embed creation.
 
 ### Database Schema
 
 **Critical tables**:
-- `matches_cache`: Match data as JSON with status (not_started/running/finished), indexed by `begin_at` and `status`
+- `matches_cache`: Match data as JSON with status (not_started/running/finished/canceled), indexed by `begin_at` and `status`
+- `match_streams` ✨ NEW: Platform, channel_name, language, official/main flags. Foreign key to matches_cache. Indexed for fast lookups.
 - `match_reminders`: Reminder scheduling (guild_id, match_id, minutes_before, scheduled_time, sent flag)
 - `guild_config`: Per-guild notification settings with `notification_channel_id`
 - `guild_favorite_teams`: Team filtering by guild
@@ -123,6 +145,7 @@ Always check `notification_history` before sending; mark sent in `match_reminder
   - `GET /csgo/matches/running` (no pagination needed)
   - `GET /csgo/matches/past?filter[status]=finished`
   - `GET /csgo/matches/past?filter[status]=canceled`
+- **Key Field**: `streams_list` array contains stream metadata (platform, channel, language, official flags)
 
 #### ⚠️ CRITICAL: PandaScore API Response Variations by Match Status
 
@@ -178,6 +201,17 @@ Always check `notification_history` before sending; mark sent in `match_reminder
 - Interactions must defer with `await interaction.response.defer()` if >3s processing expected
 - Use `nextcord.Intents.default()` with `guilds=True` and `guild_messages=True`
 - Set `default_guild_ids` to TESTING_GUILD_ID for instant command propagation (vs 1h global)
+
+### Twitch & YouTube Services
+- **TwitchSearchService**: Fallback search when `streams_list` is sparse. Uses OAuth2 client credentials flow. Token cached 1h.
+- **YouTubeService**: Extracts channel info from YouTube URLs. Supports video IDs, channel handles, and live URLs. Optional (YOUTUBE_API_KEY in .env).
+- Both services are **optional enrichment** - primary stream data comes from PandaScore `streams_list`
+
+### Temporal Cache (42-hour window)
+- **Purpose**: Keep cache relevant without manual cleanup. Uses `begin_at` field for temporal ordering.
+- **Implementation**: `temporal_cache.py` maintains sliding window. Queries filter by `begin_at >= now - 42h` and `begin_at <= now + some_buffer`
+- **Used by**: Cache scheduler to decide which matches to keep, avoiding stale data
+- **Pattern**: Call `ensure_temporal_coverage()` before rendering match lists
 
 ### libSQL (Turso)
 - Connection: `libsql_client.create_client(url=db_url, auth_token=auth_token)`
@@ -394,8 +428,11 @@ ENTREGA_FINAL.md                        # Delivery documentation (commit)
 | `src/bot.py` | Bot lifecycle & component initialization | `HLTVBot.__init__()`, `on_ready()` |
 | `src/services/pandascore_service.py` | API client | `get_upcoming_matches()`, `get_running_matches()`, `get_past_matches()` |
 | `src/services/cache_scheduler.py` | Background task scheduler | `update_all_matches()`, `update_live_matches()` |
-| `src/database/cache_manager.py` | Cache operations | `cache_matches()`, `get_cached_matches()`, `get_cached_matches_fast()` |
+| `src/services/twitch_search_service.py` | Twitch stream search (fallback) | `_get_access_token()`, `search_streams()` |
+| `src/services/youtube_service.py` | YouTube channel/video info (fallback) | `_extract_channel_id_from_url()`, `get_channel_info()` |
+| `src/database/cache_manager.py` | Cache operations | `cache_matches()`, `get_cached_matches()`, `cache_streams()`, `get_match_streams()` |
+| `src/database/temporal_cache.py` | 42h temporal window management | `get_temporal_window()`, `get_match_temporal_anchor()` |
 | `src/services/notification_manager.py` | Reminder scheduling | `setup_reminders_for_match()`, `start_reminder_loop()` |
 | `src/cogs/matches.py` | Match query commands | `/partidas`, `/aovivo`, `/resultados` |
-| `src/database/schema.sql` | Database schema | 6 tables + indexes for fast lookups |
-| `src/utils/embeds.py` | Discord embed templates | `create_match_embed()`, `create_result_embed()` |
+| `src/database/schema.sql` | Database schema | 7 tables + indexes |
+| `src/utils/embeds.py` | Discord embeds & stream formatting | `create_match_embed()`, `augment_match_with_streams()`, `format_streams_field()` |

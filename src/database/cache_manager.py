@@ -529,6 +529,40 @@ class MatchCacheManager:
             logger.error(f"✗ Erro ao buscar streams: {e}")
             return []
     
+    async def get_guild_timezone(self, guild_id: int) -> Optional[str]:
+        """
+        Obtém o timezone configurado para um servidor (guild).
+        
+        Args:
+            guild_id: ID do servidor Discord
+            
+        Returns:
+            Timezone (ex: 'America/Sao_Paulo') ou None se não configurado
+        """
+        try:
+            client = await self.get_client()
+            
+            result = await asyncio.wait_for(
+                client.execute(
+                    "SELECT timezone FROM guild_config WHERE guild_id = ?",
+                    [guild_id]
+                ),
+                timeout=self.QUERY_TIMEOUT
+            )
+            
+            if result.rows and len(result.rows) > 0:
+                timezone = result.rows[0][0]
+                return timezone if timezone else None
+            
+            return None
+            
+        except asyncio.TimeoutError:
+            logger.warning(f"⏱️ Timeout ao buscar timezone para guild {guild_id}")
+            return None
+        except Exception as e:
+            logger.error(f"✗ Erro ao buscar timezone: {e}")
+            return None
+    
     @staticmethod
     def _extract_platform(url: str) -> str:
         """

@@ -292,10 +292,10 @@ class NotificationManager:
             
             logger.info(f"      [NOTIF-OK] ✅ Guild encontrada: '{guild.name}' (ID: {guild_id})")
             
-            # 2. Buscar configuração da guild
+            # 2. Buscar configuração da guild (incluindo timezone)
             client = await self.cache_manager.get_client()
             result = await client.execute(
-                "SELECT notification_channel_id FROM guild_config WHERE guild_id = ?",
+                "SELECT notification_channel_id, timezone FROM guild_config WHERE guild_id = ?",
                 [guild_id]
             )
             
@@ -304,6 +304,7 @@ class NotificationManager:
                 return False
             
             channel_id = result.rows[0][0]
+            timezone = result.rows[0][1] or "America/Sao_Paulo"
             
             # 3. Verificar se channel_id foi configurado
             if not channel_id:
@@ -329,7 +330,9 @@ class NotificationManager:
                 return False
             
             # 6. Criar embed
-            embed = await self._create_reminder_embed(match, minutes_before)
+            # Converter timezone para string (libSQL retorna bytes)
+            tz_str = timezone.decode() if isinstance(timezone, bytes) else str(timezone or "America/Sao_Paulo")
+            embed = await self._create_reminder_embed(match, minutes_before, timezone=tz_str)
             logger.info(f"      [NOTIF-OK] ✅ Embed criado")
             
             # 7. Enviar mensagem
@@ -352,8 +355,10 @@ class NotificationManager:
             logger.error(traceback.format_exc())
             return False
     
-    async def _create_reminder_embed(self, match: Dict, minutes_before: int) -> nextcord.Embed:
+    async def _create_reminder_embed(self, match: Dict, minutes_before: int, timezone: str = "America/Sao_Paulo") -> nextcord.Embed:
         """Cria um embed para notificação de lembrete com informações de streams."""
+        
+        from src.utils.timezone_manager import TimezoneManager
         
         # Definir texto do lembrete
         if minutes_before == 0:
@@ -390,8 +395,21 @@ class NotificationManager:
         
         embed.add_field(name="📅 Torneio", value=tournament, inline=False)
         
+        # ✨ Usar TimezoneManager para horário com timezone
         begin_at = match.get('begin_at', 'Horário não disponível')
-        embed.add_field(name="⏰ Horário", value=str(begin_at), inline=False)
+        if begin_at and isinstance(begin_at, str):
+            try:
+                dt_utc = TimezoneManager.parse_iso_datetime(begin_at)
+                timestamp_discord = TimezoneManager.discord_timestamp(dt_utc, timezone, format_type="f")
+                tz_abbr = TimezoneManager.get_timezone_abbreviation(timezone)
+                tz_offset = TimezoneManager.get_timezone_offset(timezone)
+                horario_display = f"{timestamp_discord} ({tz_abbr} {tz_offset})"
+            except Exception as e:
+                horario_display = str(begin_at)
+        else:
+            horario_display = str(begin_at)
+        
+        embed.add_field(name="⏰ Horário", value=horario_display, inline=False)
         
         # NOVO: Adicionar streams se disponíveis
         try:
@@ -552,10 +570,10 @@ class NotificationManager:
             
             logger.info(f"      [RESULT-OK] ✅ Guild encontrada: '{guild.name}'")
             
-            # 2. Buscar configuração da guild
+            # 2. Buscar configuração da guild (incluindo timezone)
             client = await self.cache_manager.get_client()
             result = await client.execute(
-                "SELECT notification_channel_id FROM guild_config WHERE guild_id = ?",
+                "SELECT notification_channel_id, timezone FROM guild_config WHERE guild_id = ?",
                 [guild_id]
             )
             
@@ -564,6 +582,7 @@ class NotificationManager:
                 return False
             
             channel_id = result.rows[0][0]
+            timezone = result.rows[0][1] or "America/Sao_Paulo"
             
             # 3. Verificar se channel_id foi configurado
             if not channel_id:
@@ -588,8 +607,10 @@ class NotificationManager:
                 logger.error(f"      [RESULT-ERR] ❌ Erro ao parsear JSON: {e}")
                 return False
             
-            # 6. Criar embed de resultado
-            embed = create_result_embed(match)
+            # 6. Criar embed de resultado com timezone
+            # Converter timezone para string (libSQL retorna bytes)
+            tz_str = timezone.decode() if isinstance(timezone, bytes) else str(timezone or "America/Sao_Paulo")
+            embed = create_result_embed(match, timezone=tz_str)
             
             # NOVO: Adicionar streams se disponíveis
             try:
