@@ -17,10 +17,10 @@ Bot de Discord para enviar notificações automáticas de partidas de Counter-St
 ## Stack principal
 
 - Linguagem: Python 3.10+
-- Discord framework: Nextcord >= 2.6.0
+- Discord framework: Nextcord >= 2.4
 - API de dados: PandaScore (CS2 Fixtures)
-- HTTP assíncrono: aiohttp >= 3.9.0
-- Scheduler: Discord Tasks (built-in)
+- HTTP assíncrono: aiohttp
+- Scheduler: APScheduler
 - DB: SQLite com libSQL (Turso) backend
 - Cache: 3-tier (memory → DB → API fallback)
 
@@ -205,28 +205,18 @@ python scripts/fix_stuck_matches.py           # Corrigir partidas travadas
 ### Arquivo: `.env`
 
 ```env
-# Discord Bot Configuration
-DISCORD_TOKEN=your_discord_bot_token_here
+# Token do Bot Discord
+DISCORD_TOKEN=your_discord_token_here
 
-# PandaScore API Key
-PANDASCORE_API_KEY=your_pandascore_api_key_here
+# ID do servidor (Guild) - opcional
+DISCORD_GUILD_ID=your_guild_id
 
-# Database - libSQL (Turso)
-LIBSQL_URL=file:./data/bot.db
-LIBSQL_AUTH_TOKEN=
+# Token da API PandaScore
+PANDASCORE_TOKEN=your_pandascore_token
 
-# Guild ID for testing (instant command registration)
-TESTING_GUILD_ID=your_guild_id_here
+# URL do banco de dados Turso
+DATABASE_URL=libsql://...
 ```
-
-**Variáveis obrigatórias:**
-- `DISCORD_TOKEN`: Token do bot Discord (obrigatório)
-- `PANDASCORE_API_KEY`: Chave da API PandaScore (obrigatório)
-
-**Variáveis opcionais:**
-- `TESTING_GUILD_ID`: ID do servidor de teste para registro instantâneo de comandos
-- `LIBSQL_URL`: URL do banco (padrão: arquivo local)
-- `LIBSQL_AUTH_TOKEN`: Token para Turso (apenas se usar banco remoto)
 
 Ver `SETUP.md` para instruções detalhadas.
 
@@ -383,7 +373,7 @@ R: Em `src/services/cache_scheduler.py`, decoradores `@tasks.loop(minutes=3)` e 
 R: Ver `docs/GUIA_NOTIFICACOES.md`
 
 **P: Posso hospedar em um servidor?**  
-R: Sim! Ver `SETUP.md` para instruções de produção
+R: Sim! Ver `docs/DEPLOYMENT.md` (se existir) ou `SETUP.md`
 
 ---
 
@@ -442,10 +432,8 @@ source venv/bin/activate
 # instalar dependências
 pip install -r requirements.txt
 
-# copiar .env e editar (DISCORD_TOKEN, PANDASCORE_API_KEY, LIBSQL_URL)
-cp .env.example .env  # Linux/macOS
-# ou
-copy .env.example .env  # Windows
+# copiar .env e editar (DISCORD_TOKEN, PANDASCORE_API_KEY, DATABASE_PATH)
+cp .env.example .env
 
 # rodar o bot em modo desenvolvimento
 python -m src.bot
