@@ -118,7 +118,7 @@ class CacheScheduler:
                     for match in all_matches:
                         if match.get("streams_list"):
                             try:
-                                await self.cache_manager.cache_streams(match["id"], match["streams_list"])
+                                await self.cache_manager.cache_streams(match["id"], match["streams_list"], source="pandascore")
                                 streams_cached += 1
                             except Exception as e:
                                 logger.debug(f"Erro ao cachear streams do match {match.get('id')}: {e}")
@@ -273,12 +273,12 @@ class CacheScheduler:
                     stats = await self.cache_manager.cache_matches(running, "running")
                     logger.info(f"✓ {len(running)} partidas ao vivo atualizadas")
                     
-                    # � NOVA OTIMIZAÇÃO: Cachear streams das partidas ao vivo
+                    # 🚀 NOVA OTIMIZAÇÃO: Cachear streams das partidas ao vivo
                     streams_cached = 0
                     for match in running:
                         if match.get("streams_list"):
                             try:
-                                await self.cache_manager.cache_streams(match["id"], match["streams_list"])
+                                await self.cache_manager.cache_streams(match["id"], match["streams_list"], source="pandascore")
                                 streams_cached += 1
                             except Exception as e:
                                 logger.debug(f"Erro ao cachear streams do match {match.get('id')}: {e}")
@@ -569,15 +569,17 @@ class CacheScheduler:
             logger.warning("⚠️ Agendador já está rodando")
             return
         
-        # Iniciar ambas as tasks
+        # Iniciar todas as tasks
         self.update_all_task.start()
         self.check_finished_task.start()
+        self.populate_streams_task.start()
         
         self.is_running = True
         
         logger.info("✓ Agendador iniciado com Discord Tasks!")
         logger.info("  • Atualização completa: a cada 3 minutos")
         logger.info("  • Verificação de resultados: a cada 1 minuto")
+        logger.info("  • Busca automática de streams: a cada 10 minutos")
         logger.info("  • Primeira execução: em 2 segundos")
     
     def stop(self):
@@ -608,3 +610,137 @@ class CacheScheduler:
         elif task_name == "check_finished" and self.check_finished_task.next_iteration:
             return self.check_finished_task.next_iteration.strftime("%Y-%m-%d %H:%M:%S")
         return "N/A"
+
+    # Task: Busca automática de streams a cada 10 minutos
+    @tasks.loop(minutes=10, count=None)
+    async def populate_streams_task(self):
+        """Task para buscar automaticamente streams na Twitch para matches sem raw_url."""
+        await self.populate_missing_streams()
+    
+    @populate_streams_task.before_loop
+    async def before_populate_streams(self):
+        """Aguarda o bot estar pronto antes de iniciar a task."""
+        await asyncio.sleep(5)  # Delay maior para deixar cache estável primeiro
+
+    async def populate_missing_streams(self):
+        """
+        🤖 NOVO: Busca automaticamente streams na Twitch para matches
+        que NÃO têm raw_url disponível.
+        
+        Executado periodicamente para popular informações de streams faltando.
+        Útil quando PandaScore não retorna link direto mas stream está disponível.
+        
+        Fluxo:
+        1. Buscar matches ao vivo (running) ou próximos (not_started)
+        2. Para cada match: verificar se tem raw_url
+        3. Se não tem: buscar na Twitch automaticamente
+        4. Se encontrar: armazenar no cache
+        """
+        try:
+            logger.info("🤖 Iniciando busca automática de streams na Twitch...")
+            
+            from src.services.twitch_search_service import get_twitch_search_service
+            twitch_service = await get_twitch_search_service()
+            
+            # Buscar matches running ou upcoming que ainda não têm stream
+            client = await self.cache_manager.get_client()
+            
+            # Query: matches running ou upcoming SEM raw_url
+            result = await client.execute(
+                """
+                SELECT DISTINCT 
+                    m.match_id,
+                    m.match_data
+                FROM matches_cache m
+                WHERE m.status IN ('running', 'not_started')
+                AND NOT EXISTS (
+                    SELECT 1 FROM match_streams s 
+                    WHERE s.match_id = m.match_id AND s.raw_url IS NOT NULL
+                )
+                ORDER BY m.begin_at ASC
+                LIMIT 20
+                """
+            )
+            
+            if not result.rows:
+                logger.debug("✓ Nenhum match sem stream para processar")
+                return
+            
+            logger.info(f"🔍 Encontrados {len(result.rows)} matches sem streams")
+            
+            imported_count = 0
+            
+            for row in result.rows:
+                try:
+                    match_id = int(row[0])
+                    match_data_str = str(row[1])
+                except (ValueError, TypeError, IndexError):
+                    continue
+                
+                try:
+                    import json
+                    match_data = json.loads(match_data_str)
+                    
+                    # Extrair informações para busca
+                    championship = match_data.get("league", {}).get("name", "") or \
+                                   match_data.get("tournament", {}).get("name", "")
+                    
+                    opponents = match_data.get("opponents", [])
+                    if len(opponents) < 2:
+                        continue
+                    
+                    team1 = opponents[0].get("opponent", {}).get("name", "")
+                    team2 = opponents[1].get("opponent", {}).get("name", "")
+                    
+                    if not (team1 and team2 and championship):
+                        continue
+                    
+                    # Buscar na Twitch
+                    logger.debug(f"  🔎 Buscando stream para: {team1} vs {team2} ({championship})")
+                    
+                    stream_result = await twitch_service.search_streams(
+                        championship=championship,
+                        team1_name=team1,
+                        team2_name=team2,
+                        language="pt"
+                    )
+                    
+                    if stream_result:
+                        # Converter para formato compatível com cache
+                        stream_cache_data = {
+                            "match_id": match_id,
+                            "raw_url": stream_result["url"],
+                            "platform": "twitch",
+                            "channel_name": stream_result["channel_name"],
+                            "language": stream_result.get("language", "unknown"),
+                            "is_official": False,  # Automatizadas são sempre não-oficiais
+                            "is_main": False,
+                            "is_automated": True,  # Flag importante!
+                            "viewer_count": stream_result.get("viewer_count", 0),
+                            "title": stream_result.get("title", ""),
+                            "created_at": datetime.now(timezone.utc).isoformat()
+                        }
+                        
+                        # Cachear
+                        await self.cache_manager.cache_streams(match_id, [stream_cache_data], source="twitch_search")
+                        
+                        logger.info(
+                            f"  ✅ Stream encontrada: {stream_result['channel_name']} "
+                            f"({stream_result['viewer_count']} viewers)"
+                        )
+                        imported_count += 1
+                    else:
+                        logger.debug(f"  ❌ Nenhuma stream encontrada para {team1} vs {team2}")
+                
+                except Exception as e:
+                    logger.error(f"Erro ao processar match {match_id}: {e}")
+                    continue
+            
+            if imported_count > 0:
+                logger.info(f"🤖 ✓ {imported_count} streams automatizadas adicionadas ao cache")
+            else:
+                logger.debug("🤖 Nenhuma stream nova encontrada na Twitch")
+        
+        except Exception as e:
+            logger.error(f"❌ Erro ao buscar streams automaticamente: {e}")
+

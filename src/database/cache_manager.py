@@ -115,7 +115,7 @@ class MatchCacheManager:
                         # Cachear streams da partida se disponível
                         streams_list = match.get("streams_list", [])
                         if streams_list:
-                            await self.cache_streams(match_id, streams_list)
+                            await self.cache_streams(match_id, streams_list, source="pandascore")
                         
                         if exists:
                             stats["updated"] += 1
@@ -378,7 +378,7 @@ class MatchCacheManager:
         matches = _memory_cache.get(status) or []
         return matches[:limit]
     
-    async def cache_streams(self, match_id: int, streams_list: List[Dict]) -> bool:
+    async def cache_streams(self, match_id: int, streams_list: List[Dict], source: str = "pandascore") -> bool:
         """
         Armazena streams de uma partida no cache.
         
@@ -388,6 +388,7 @@ class MatchCacheManager:
         Args:
             match_id: ID da partida
             streams_list: Lista de streams da API PandaScore
+            source: Origem dos streams ('pandascore' ou 'twitch_search')
             
         Returns:
             bool: True se sucesso, False se erro
@@ -406,6 +407,14 @@ class MatchCacheManager:
                 [match_id]
             )
             
+            # Mapa de emojis de origem
+            source_emoji = {
+                "pandascore": "🌐",  # API
+                "twitch_search": "🔍",  # Busca manual
+            }
+            emoji = source_emoji.get(source, "📡")
+            source_label = "PandaScore API" if source == "pandascore" else "Busca Manual (Twitch)"
+            
             # Inserir novos streams
             cached_count = 0
             for stream in streams_list:
@@ -418,16 +427,34 @@ class MatchCacheManager:
                 platform = self._extract_platform(raw_url)
                 channel_name = self._extract_channel_name(raw_url)
                 
-                # Debug: log de cada stream sendo cacheado
-                logger.debug(f"   📡 Match {match_id}: {platform} / {channel_name} ({stream.get('language')})")
+                # 🎥 NOVO: Para YouTube, tentar buscar o nome real do canal via API
+                # Isso cobre: watch?v=..., youtu.be/..., @channel, c/channel, etc
+                if platform == "youtube":
+                    try:
+                        from src.services.youtube_service import get_youtube_service
+                        youtube_svc = get_youtube_service()
+                        real_channel_name = await youtube_svc.get_channel_name(raw_url)
+                        if real_channel_name:
+                            # Atualizar com nome real
+                            old_name = channel_name
+                            channel_name = real_channel_name
+                            logger.info(f"   🎥 YouTube: '{old_name}' → '{real_channel_name}' (Match {match_id})")
+                        else:
+                            logger.debug(f"   🎥 Não foi possível obter nome real para: {raw_url}")
+                    except Exception as e:
+                        logger.warning(f"   ⚠️  Erro ao buscar nome do canal YouTube: {e}")
+                        # Continua com o nome extraído, não falha
+                
+                # Debug: log de cada stream sendo cacheado com origem
+                logger.debug(f"   {emoji} Match {match_id}: {platform} / {channel_name} ({stream.get('language')}) [{source_label}]")
                 
                 # Usar embed_url se tiver, senão usar raw_url como fallback
                 url_for_db = stream.get("embed_url") or raw_url
                 
                 await client.execute(
                     """INSERT INTO match_streams 
-                       (match_id, platform, channel_name, url, raw_url, language, is_official, is_main)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                       (match_id, platform, channel_name, url, raw_url, language, is_official, is_main, is_automated, viewer_count, title)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     [
                         match_id,
                         platform,
@@ -436,12 +463,15 @@ class MatchCacheManager:
                         raw_url,
                         stream.get("language", "unknown"),
                         1 if stream.get("official", False) else 0,
-                        1 if stream.get("main", False) else 0
+                        1 if stream.get("main", False) else 0,
+                        1 if stream.get("is_automated", False) else 0,
+                        stream.get("viewer_count", 0) or 0,
+                        stream.get("title", "") or ""
                     ]
                 )
                 cached_count += 1
             
-            logger.info(f"   📡 {cached_count} streams cacheados para match {match_id}")
+            logger.info(f"   {emoji} {cached_count} stream(s) cacheado(s) para match {match_id} [{source_label}]")
             return True
             
         except asyncio.TimeoutError:
@@ -466,7 +496,7 @@ class MatchCacheManager:
             
             result = await asyncio.wait_for(
                 client.execute(
-                    """SELECT platform, channel_name, url, raw_url, language, is_official, is_main
+                    """SELECT platform, channel_name, url, raw_url, language, is_official, is_main, is_automated, viewer_count, title
                        FROM match_streams
                        WHERE match_id = ?
                        ORDER BY is_main DESC, is_official DESC, language ASC""",
@@ -484,7 +514,10 @@ class MatchCacheManager:
                     "raw_url": row[3],
                     "language": row[4],
                     "is_official": bool(row[5]),
-                    "is_main": bool(row[6])
+                    "is_main": bool(row[6]),
+                    "is_automated": bool(row[7]) if row[7] is not None else False,
+                    "viewer_count": row[8] if row[8] is not None else 0,
+                    "title": row[9] if row[9] is not None else ""
                 })
             
             return streams
@@ -536,22 +569,37 @@ class MatchCacheManager:
         # Para Twitch: www.twitch.tv/channel_name
         if "twitch.tv" in url:
             parts = url.split("/")
-            return parts[-1] if len(parts) > 1 else "unknown"
+            channel = parts[-1] if len(parts) > 1 else "unknown"
+            return channel.split("?")[0].split("#")[0]  # Remove query params
         
         # Para Kick: kick.com/channel_name
         elif "kick.com" in url:
             parts = url.split("/")
-            return parts[-1] if len(parts) > 1 else "unknown"
+            channel = parts[-1] if len(parts) > 1 else "unknown"
+            return channel.split("?")[0].split("#")[0]  # Remove query params
         
-        # Para YouTube: youtube.com/c/channel_name ou youtube.com/@channel_name
-        elif "youtube.com" in url:
-            parts = url.split("/")
-            return parts[-1] if len(parts) > 1 else "unknown"
+        # Para YouTube: youtube.com/c/channel_name ou youtube.com/@channel_name ou watch?v=...
+        elif "youtube.com" in url or "youtu.be" in url:
+            # Se é um link de canal (youtube.com/c/... ou youtube.com/@...)
+            if "/c/" in url or "/@" in url:
+                parts = url.split("/")
+                for i, part in enumerate(parts):
+                    if part in ["c"] or part.startswith("@"):
+                        channel = parts[i + 1] if i + 1 < len(parts) else "unknown"
+                        return channel.split("?")[0].split("#")[0]
+            # Se é um link short do YouTube (youtu.be/...) - é sempre um vídeo
+            if "youtu.be" in url:
+                return "YouTube"
+            # Se é um link de vídeo (watch?v=...) - é sempre um vídeo
+            if "watch?v=" in url or "/videos" in url or "/live" in url:
+                return "YouTube"
+            return "YouTube"
         
         # Para Facebook
         elif "facebook.com" in url or "fb.watch" in url:
             parts = url.split("/")
-            return parts[-1] if len(parts) > 1 else "unknown"
+            channel = parts[-1] if len(parts) > 1 else "unknown"
+            return channel.split("?")[0].split("#")[0]  # Remove query params
         
         else:
             return "unknown"

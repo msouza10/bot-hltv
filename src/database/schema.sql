@@ -108,6 +108,9 @@ CREATE TABLE IF NOT EXISTS match_streams (
     language TEXT NOT NULL,         -- Idioma (en, pt, ru, etc)
     is_official BOOLEAN DEFAULT 0,  -- true = stream oficial
     is_main BOOLEAN DEFAULT 0,      -- true = stream primária
+    is_automated BOOLEAN DEFAULT 0, -- true = encontrada automaticamente (🤖)
+    viewer_count INTEGER DEFAULT 0, -- Quantidade de viewers (para automatizadas)
+    title TEXT,                     -- Título da stream (para automatizadas)
     cached_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (match_id) REFERENCES matches_cache(match_id) ON DELETE CASCADE,

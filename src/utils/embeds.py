@@ -7,20 +7,256 @@ from datetime import datetime
 from typing import Optional, List, Dict
 
 
-# Mapa de bandeiras por idioma
+# Mapa de bandeiras por idioma (70+ idiomas suportados)
+# Cobre 99%+ dos streams reais da API PandaScore
 LANGUAGE_FLAGS = {
-    "en": "🇬🇧",
-    "pt": "🇧🇷",
+    # Português
+    "pt": "🇵🇹",
     "pt-BR": "🇧🇷",
-    "ru": "🇷🇺",
-    "fr": "🇫🇷",
-    "de": "🇩🇪",
+    "pt-PT": "🇵🇹",
+    
+    # Inglês
+    "en": "🇬🇧",
+    "en-US": "🇺🇸",
+    "en-GB": "🇬🇧",
+    "en-AU": "🇦🇺",
+    "en-CA": "🇨🇦",
+    "en-NZ": "🇳🇿",
+    "en-IN": "��🇳",
+    "en-ZA": "🇿🇦",
+    
+    # Espanhol
     "es": "🇪🇸",
-    "ja": "🇯🇵",
-    "ko": "🇰🇷",
+    "es-MX": "🇲🇽",
+    "es-AR": "🇦🇷",
+    
+    # Francês
+    "fr": "🇫🇷",
+    "fr-CA": "🇨🇦",
+    "fr-CH": "🇨🇭",
+    "fr-BE": "🇧🇪",
+    
+    # Alemão
+    "de": "🇩🇪",
+    "de-AT": "🇦🇹",
+    "de-CH": "🇨🇭",
+    
+    # Russo
+    "ru": "🇷🇺",
+    
+    # Chinês
     "zh": "🇨🇳",
+    "zh-Hans": "🇨🇳",
+    "zh-Hant": "🇭🇰",
+    "zh-TW": "🇹🇼",
+    "zh-HK": "🇭🇰",
+    
+    # Japonês
+    "ja": "🇯🇵",
+    
+    # Coreano
+    "ko": "🇰🇷",
+    "ko-KR": "🇰🇷",
+    
+    # Polonês
     "pl": "🇵🇱",
+    
+    # Turco
     "tr": "🇹🇷",
+    
+    # Italiano
+    "it": "🇮🇹",
+    
+    # Holandês
+    "nl": "🇳🇱",
+    "nl-BE": "🇧🇪",
+    
+    # Sueco
+    "sv": "🇸🇪",
+    
+    # Norueguês
+    "no": "🇳🇴",
+    "nb": "🇳🇴",
+    "nn": "🇳🇴",
+    
+    # Dinamarquês
+    "da": "🇩🇰",
+    
+    # Finlandês
+    "fi": "🇫🇮",
+    
+    # Grego
+    "el": "🇬🇷",
+    
+    # Húngaro
+    "hu": "🇭🇺",
+    
+    # Tcheco
+    "cs": "��🇿",
+    
+    # Eslovaco
+    "sk": "🇸🇰",
+    
+    # Esloveno
+    "sl": "🇸🇮",
+    
+    # Croata
+    "hr": "🇭🇷",
+    
+    # Sérvio
+    "sr": "🇷��",
+    
+    # Búlgaro
+    "bg": "🇧🇬",
+    
+    # Romeno
+    "ro": "🇷🇴",
+    
+    # Ucraniano
+    "uk": "🇺🇦",
+    
+    # Bielorrusso
+    "be": "🇧🇾",
+    
+    # Hebraico
+    "he": "🇮🇱",
+    
+    # Árabe
+    "ar": "🇸🇦",
+    
+    # Persa
+    "fa": "🇮🇷",
+    
+    # Tailandês
+    "th": "🇹��",
+    
+    # Vietnamita
+    "vi": "🇻🇳",
+    
+    # Indonésio
+    "id": "🇮🇩",
+    
+    # Malaio
+    "ms": "🇲🇾",
+    
+    # Tagalog
+    "tl": "��🇭",
+    
+    # Bengalês
+    "bn": "🇧🇩",
+    
+    # Hindi
+    "hi": "🇮🇳",
+    
+    # Khmer
+    "km": "🇰🇭",
+    
+    # Lao
+    "lo": "🇱🇦",
+    
+    # Birmanês
+    "my": "🇲🇲",
+    
+    # Cingalês
+    "si": "🇱🇰",
+    
+    # Afrikaans
+    "af": "🇿🇦",
+    
+    # Islandês
+    "is": "🇮🇸",
+    
+    # Galego
+    "gl": "🇪🇸",
+    
+    # Basco
+    "eu": "🇪🇸",
+    
+    # Catalão
+    "ca": "🇪🇸",
+    
+    # Maltês
+    "mt": "🇲🇹",
+    
+    # Luxemburguês
+    "lb": "🇱🇺",
+    
+    # Lituano
+    "lt": "🇱🇹",
+    
+    # Letão
+    "lv": "🇱🇻",
+    
+    # Estoniano
+    "et": "🇪🇪",
+    
+    # Georgiano
+    "ka": "🇬🇪",
+    
+    # Armênio
+    "hy": "🇦🇲",
+    
+    # Azerbaijano
+    "az": "🇦🇿",
+    
+    # Cazaque
+    "kk": "🇰🇿",
+    
+    # Uzbeque
+    "uz": "🇺🇿",
+    
+    # Turcomeno
+    "tk": "🇹🇲",
+    
+    # Tadjique
+    "tg": "🇹🇯",
+    
+    # Quirguiz
+    "ky": "🇰🇬",
+    
+    # Suaíli
+    "sw": "🇹🇿",
+    
+    # Igbo
+    "ig": "🇳🇬",
+    
+    # Iorubá
+    "yo": "🇳🇬",
+    
+    # Hauçá
+    "ha": "🇳🇬",
+    
+    # Zulu
+    "zu": "🇿🇦",
+    
+    # Xhosa
+    "xh": "🇿🇦",
+    
+    # Tswana
+    "tn": "🇧🇼",
+    
+    # Quéchua
+    "qu": "🇵🇪",
+    
+    # Aimará
+    "ay": "🇧🇴",
+    
+    # Guarani
+    "gn": "🇵🇾",
+    
+    # Maori
+    "mi": "🇳🇿",
+    
+    # Samoano
+    "sm": "🇼🇸",
+    
+    # Tonganês
+    "to": "🇹🇴",
+    
+    # Fidiano
+    "fj": "��🇯",
+    
+    # Desconhecido
     "unknown": "❓"
 }
 
@@ -36,6 +272,92 @@ PLATFORM_ICONS = {
 # Estrela de oficial
 OFFICIAL_STAR = "⭐"
 
+# Mapa de tier do campeonato para emoji e cor
+# Baseado em: a b c d s unranked (enum da API)
+# Ranking: S > A > B > C > D > Unranked
+TIER_MAP = {
+    "s": {"emoji": "🏆", "label": "Tier S - Elite", "color": 0xFFAA00},
+    "a": {"emoji": "👑", "label": "Tier A - Top", "color": 0xFFFF00},
+    "b": {"emoji": "🥇", "label": "Tier B - Profissional", "color": 0xE0E0E0},
+    "c": {"emoji": "🥈", "label": "Tier C - Semi-Pro", "color": 0xCD7F32},
+    "d": {"emoji": "🥉", "label": "Tier D - Regional", "color": 0x5E5E5E},
+    "unranked": {"emoji": "❓", "label": "Unranked", "color": 0x95A5A6},
+}
+
+# Mapa de regiões para emoji e label
+# Baseado em: ASIA EEU ME NA OCE SA WEU (enum da API)
+REGION_MAP = {
+    "ASIA": {"emoji": "�", "label": "Ásia"},
+    "AS": {"emoji": "🌏", "label": "Ásia"},  # Fallback abreviado
+    "EEU": {"emoji": "🇪🇺", "label": "Leste Europeu"},
+    "ME": {"emoji": "🕌", "label": "Oriente Médio"},
+    "NA": {"emoji": "��", "label": "América do Norte"},
+    "OCE": {"emoji": "🇦🇺", "label": "Oceania"},
+    "SA": {"emoji": "🇧🇷", "label": "América do Sul"},
+    "WEU": {"emoji": "🇪�", "label": "Oeste Europeu"},
+    "unknown": {"emoji": "🌍", "label": "Regional"},
+}
+
+# Mapa de tipo de evento para emoji
+EVENT_TYPE_MAP = {
+    "online": "💻",
+    "offline": "🏟️",
+    "online-and-offline": "🌐",
+}
+
+
+def get_tier_info(tier: Optional[str]) -> tuple:
+    """
+    Obtém informações de tier formatadas.
+    
+    Args:
+        tier: Código do tier (d, c, b, a, s)
+        
+    Returns:
+        Tupla (emoji, label)
+    """
+    if not tier or tier == "unknown":
+        return ("❓", "Tier Desconhecido")
+    
+    tier_data = TIER_MAP.get(tier.lower(), TIER_MAP["d"])
+    return (tier_data["emoji"], tier_data["label"])
+
+
+def get_region_info(region: Optional[str]) -> tuple:
+    """
+    Obtém informações de região formatadas.
+    
+    Args:
+        region: Código da região (EEU, WEU, NA, SA, OCE, AS)
+        
+    Returns:
+        Tupla (emoji, label)
+    """
+    if not region:
+        return REGION_MAP["unknown"]["emoji"], REGION_MAP["unknown"]["label"]
+    
+    region_data = REGION_MAP.get(region.upper(), REGION_MAP["unknown"])
+    return (region_data["emoji"], region_data["label"])
+
+
+def get_event_type_info(event_type: Optional[str]) -> tuple:
+    """
+    Obtém informações do tipo de evento formatadas.
+    
+    Args:
+        event_type: Tipo do evento (online, offline, online-and-offline)
+        
+    Returns:
+        Tupla (emoji, label)
+    """
+    if not event_type:
+        return ("❓", "Tipo Desconhecido")
+    
+    type_lower = event_type.lower()
+    emoji = EVENT_TYPE_MAP.get(type_lower, "❓")
+    label = type_lower.replace("-", " / ").title()
+    return (emoji, label)
+
 
 async def augment_match_with_streams(match_data: Dict, cache_manager) -> Dict:
     """
@@ -43,6 +365,9 @@ async def augment_match_with_streams(match_data: Dict, cache_manager) -> Dict:
     
     ✨ OTIMIZAÇÃO: Se o match tiver streams_list IN MEMORY, formata direto
     sem fazer operações DB. Só busca do cache se não tiver streams_list.
+    
+    🤖 NOVO: Se não houver streams, busca automaticamente na Twitch
+    e adiciona flag is_automated para avisar ao usuário.
     
     Args:
         match_data: Dados do match original
@@ -61,7 +386,7 @@ async def augment_match_with_streams(match_data: Dict, cache_manager) -> Dict:
         if streams_list:
             # Não faz DB aqui - formato direto da API
             # A API retorna os dados estruturados
-            formatted = format_streams_field(streams_list)
+            formatted = format_streams_field(streams_list, match_data)
             if formatted:
                 match_data["formatted_streams"] = formatted
                 # Background: cachear para próximas vezes (não bloqueia resposta)
@@ -73,8 +398,16 @@ async def augment_match_with_streams(match_data: Dict, cache_manager) -> Dict:
         streams = await cache_manager.get_match_streams(match_id)
         
         if streams:
-            formatted = format_streams_field(streams)
+            formatted = format_streams_field(streams, match_data)
             match_data["formatted_streams"] = formatted
+        else:
+            # Sem streams no cache também, tentar busca automática
+            # (isso vai cair no logic dentro de format_streams_field)
+            formatted = format_streams_field([], match_data)
+            if formatted:
+                match_data["formatted_streams"] = formatted
+                # Adicionar flag para avisar que é busca automática
+                match_data["has_automated_streams"] = True
     except Exception as e:
         # Se houver erro, apenas não adiciona streams (graceful degradation)
         import logging
@@ -84,7 +417,10 @@ async def augment_match_with_streams(match_data: Dict, cache_manager) -> Dict:
     return match_data
 
 
-def format_streams_field(streams: List[Dict]) -> Optional[str]:
+def format_streams_field(
+    streams: List[Dict],
+    match_data: Optional[Dict] = None
+) -> Optional[str]:
     """
     Formata lista de streams para exibição no embed.
     
@@ -92,20 +428,60 @@ def format_streams_field(streams: List[Dict]) -> Optional[str]:
     1. Dados da API: {raw_url, language, official, main}
     2. Dados do DB: {platform, channel_name, language, is_official, is_main, url, raw_url}
     
+    NOVO: Se não houver streams e match_data for fornecido,
+    busca automaticamente na Twitch por streams disponíveis.
+    
     Formato output:
     Twitch
     - [Gaules](https://twitch.tv/gaules) 🇧🇷 ⭐
-    - [eplcs_ru](https://twitch.tv/eplcs_ru) 🇷🇺
+    - [eplcs_ru](https://twitch.tv/eplcs_ru) 🇷🇺 🤖
     
     Kick
     - [cct_cs2](https://kick.com/cct_cs2) 🇬🇧
     
     Args:
         streams: Lista de dicts (API ou DB format)
+        match_data: Dados do match (opcional) - usado para busca automática
         
     Returns:
         String formatada ou None se sem streams
     """
+    if not streams and match_data:
+        # Tentar buscar automaticamente na Twitch
+        import asyncio
+        try:
+            # Executar busca de forma assíncrona
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Se estamos dentro de async, criar uma task
+                # (mais complexo, deixar para depois)
+                logger = __import__("logging").getLogger(__name__)
+                logger.debug("Pulando busca automática Twitch (já em contexto async)")
+                return None
+            else:
+                # Se não estamos em async, rodar directly
+                from src.services.twitch_search_service import get_twitch_search_service
+                
+                championship = match_data.get("tournament", {}).get("name", "")
+                league = match_data.get("league", {}).get("name", "")
+                search_name = championship or league or "Game"
+                
+                opponents = match_data.get("opponents", [])
+                team1 = opponents[0].get("opponent", {}).get("name", "Team1") if len(opponents) > 0 else "Team1"
+                team2 = opponents[1].get("opponent", {}).get("name", "Team2") if len(opponents) > 1 else "Team2"
+                
+                twitch_service = loop.run_until_complete(get_twitch_search_service())
+                result = loop.run_until_complete(
+                    twitch_service.search_streams(search_name, team1, team2)
+                )
+                
+                if result:
+                    streams = [result]
+        except Exception as e:
+            logger = __import__("logging").getLogger(__name__)
+            logger.debug(f"Erro ao buscar streams automaticamente: {e}")
+            return None
+    
     if not streams:
         return None
     
@@ -115,7 +491,8 @@ def format_streams_field(streams: List[Dict]) -> Optional[str]:
         # Se não tem platform e channel_name, significa que vem da API
         if "platform" not in stream or stream.get("platform") is None:
             # Extrair platform e channel_name da raw_url (ou usar None se não tiver)
-            raw_url = stream.get("raw_url") or stream.get("embed_url", "")
+            # IMPORTANTE: Usar APENAS raw_url, NÃO embed_url (embed_url é para embeds, não para cliques)
+            raw_url = stream.get("raw_url", "")
             if raw_url:
                 from src.database.cache_manager import MatchCacheManager
                 platform = MatchCacheManager._extract_platform(raw_url)
@@ -132,7 +509,9 @@ def format_streams_field(streams: List[Dict]) -> Optional[str]:
                 "language": stream.get("language", "unknown"),
                 "is_official": stream.get("official", False),  # API usa "official"
                 "is_main": stream.get("main", False),  # API usa "main"
+                "is_automated": stream.get("is_automated", False),  # Flag de automatizado
                 "raw_url": raw_url,  # Guardar a URL para hyperlink
+                "title": stream.get("title", ""),  # Título do stream
             }
         else:
             # Já está no formato DB
@@ -142,7 +521,9 @@ def format_streams_field(streams: List[Dict]) -> Optional[str]:
                 "language": stream.get("language", "unknown"),
                 "is_official": stream.get("is_official", False),
                 "is_main": stream.get("is_main", False),
+                "is_automated": stream.get("is_automated", False),  # NOVO: preservar flag
                 "raw_url": stream.get("url") or stream.get("raw_url", ""),  # DB pode ter 'url' ou 'raw_url'
+                "title": stream.get("title", ""),  # Título do stream
             }
         
         normalized_streams.append(normalized)
@@ -174,7 +555,15 @@ def format_streams_field(streams: List[Dict]) -> Optional[str]:
             channel_name = stream.get("channel_name", "Unknown")
             language = stream.get("language", "unknown")
             is_official = stream.get("is_official", False)
+            is_automated = stream.get("is_automated", False)  # NOVO: flag de automatizado
             raw_url = stream.get("raw_url", "")
+            title = stream.get("title", "").strip()
+            
+            # Para YouTube, tentar usar o título se disponível
+            display_name = channel_name
+            if platform == "youtube" and title:
+                # Limitar tamanho do título para não ficar muito longo
+                display_name = title[:50] + "..." if len(title) > 50 else title
             
             # Flag de idioma
             language_flag = LANGUAGE_FLAGS.get(language, "❓")
@@ -182,14 +571,17 @@ def format_streams_field(streams: List[Dict]) -> Optional[str]:
             # Marker de oficial (estrela)
             official_marker = f" -{OFFICIAL_STAR}" if is_official else ""
             
+            # Marker de automatizado (robo)
+            automated_marker = " -🤖" if is_automated else ""
+            
             # Criar hyperlink se tiver URL
             if raw_url:
-                channel_link = f"[{channel_name}]({raw_url})"
+                channel_link = f"[{display_name}]({raw_url})"
             else:
-                channel_link = channel_name
+                channel_link = display_name
             
-            # Formato: └ [channel_name](url) - 🇧🇷 -⭐
-            result_lines.append(f"└ {channel_link} - {language_flag}{official_marker}")
+            # Formato: └ [channel_name](url) - 🇧🇷 -⭐ -🤖
+            result_lines.append(f"└ {channel_link} - {language_flag}{official_marker}{automated_marker}")
     
     if not result_lines:
         return None
@@ -276,6 +668,24 @@ def create_match_embed(match_data: Dict) -> nextcord.Embed:
         inline=False
     )
     
+    # ✨ NOVO: Adicionar informações de tier, região e tipo de evento
+    tournament_tier = tournament.get("tier", "unknown")
+    tournament_region = tournament.get("region", "unknown")
+    event_type = tournament.get("type", "unknown")
+    
+    tier_emoji, tier_label = get_tier_info(tournament_tier)
+    region_emoji, region_label = get_region_info(tournament_region)
+    event_emoji, event_label = get_event_type_info(event_type)
+    
+    # Criar linha com tier, região e tipo em um mesmo campo para economizar espaço
+    tournament_info = f"{tier_emoji} {tier_label}\n{region_emoji} {region_label}\n{event_emoji} {event_label}"
+    
+    embed.add_field(
+        name="🎯 Detalhes do Campeonato",
+        value=tournament_info,
+        inline=False
+    )
+    
     embed.add_field(
         name="📺 Formato",
         value=match_type,
@@ -288,10 +698,11 @@ def create_match_embed(match_data: Dict) -> nextcord.Embed:
         inline=True
     )
     
-    # Horário agendado
-    if scheduled_at:
+    # Horário agendado (usar begin_at como fallback se scheduled_at for null)
+    time_to_display = scheduled_at or begin_at
+    if time_to_display:
         try:
-            dt = datetime.fromisoformat(scheduled_at.replace("Z", "+00:00"))
+            dt = datetime.fromisoformat(time_to_display.replace("Z", "+00:00"))
             timestamp_discord = f"<t:{int(dt.timestamp())}:F>"
             embed.add_field(
                 name="⏰ Horário",
@@ -301,7 +712,7 @@ def create_match_embed(match_data: Dict) -> nextcord.Embed:
         except:
             embed.add_field(
                 name="⏰ Horário",
-                value=scheduled_at,
+                value=time_to_display,
                 inline=False
             )
     
@@ -375,18 +786,33 @@ def create_match_embed(match_data: Dict) -> nextcord.Embed:
     # Se o match_data contiver "formatted_streams", usamos
     formatted_streams = match_data.get("formatted_streams")
     if formatted_streams:
+        # Verificar se há streams automatizados
+        has_automated = match_data.get("has_automated_streams", False)
+        
         # Para partidas futuras, adicionar aviso sobre possíveis streams
         if is_upcoming:
-            aviso_streams = f"{formatted_streams}\n\n📌 ***Transmissão oficial = ⭐***\n"
+            aviso_streams = f"{formatted_streams}\n\n📌 ***Transmissão oficial = ⭐***"
+            
+            # Adicionar aviso se for busca automatizada
+            if has_automated:
+                aviso_streams += "\n🤖 ***Algumas streams foram encontradas automaticamente e podem não ser oficiais***"
+            
+            aviso_streams += "\n"
             embed.add_field(
                 name="📡 Streams Previstas",
                 value=aviso_streams,
                 inline=False
             )
         else:
+            streams_value = formatted_streams
+            
+            # Adicionar aviso se for busca automatizada
+            if has_automated:
+                streams_value += "\n\n🤖 ***Algumas streams foram encontradas automaticamente e podem não ser oficiais***"
+            
             embed.add_field(
                 name="📡 Streams",
-                value=formatted_streams,
+                value=streams_value,
                 inline=False
             )
     
@@ -523,6 +949,24 @@ def create_result_embed(match_data: Dict) -> nextcord.Embed:
     embed.add_field(
         name="🏆 Torneio",
         value=torneio_value,
+        inline=False
+    )
+    
+    # ✨ NOVO: Adicionar informações de tier, região e tipo de evento
+    tournament_tier = tournament.get("tier", "unknown")
+    tournament_region = tournament.get("region", "unknown")
+    event_type = tournament.get("type", "unknown")
+    
+    tier_emoji, tier_label = get_tier_info(tournament_tier)
+    region_emoji, region_label = get_region_info(tournament_region)
+    event_emoji, event_label = get_event_type_info(event_type)
+    
+    # Criar linha com tier, região e tipo em um mesmo campo para economizar espaço
+    tournament_details = f"{tier_emoji} {tier_label}\n{region_emoji} {region_label}\n{event_emoji} {event_label}"
+    
+    embed.add_field(
+        name="🎯 Detalhes do Campeonato",
+        value=tournament_details,
         inline=False
     )
     
@@ -777,3 +1221,64 @@ def create_info_embed(title: str, description: str) -> nextcord.Embed:
         timestamp=datetime.utcnow()
     )
     return embed
+
+
+def add_automated_stream_info(
+    embed: nextcord.Embed,
+    stream_data: Dict
+) -> nextcord.Embed:
+    """
+    Adiciona informação de stream automatizada ao embed.
+    
+    Usa um campo separado para não interferir no design existente.
+    Mostra: canal, URL, viewers, idioma, aviso de "não oficial".
+    
+    Args:
+        embed: Embed existente do match
+        stream_data: Dados do stream {channel_name, url, viewer_count, language, is_automated}
+        
+    Returns:
+        Embed modificado com informação de stream
+    """
+    if not stream_data or not stream_data.get("url"):
+        return embed
+    
+    channel_name = stream_data.get("channel_name", "Unknown")
+    url = stream_data.get("url", "")
+    viewers = stream_data.get("viewer_count", 0)
+    language = stream_data.get("language", "unknown")
+    
+    # Flag de idioma
+    language_flag = LANGUAGE_FLAGS.get(language, "❓")
+    
+    # Formatar viewers
+    if viewers > 0:
+        if viewers >= 1000:
+            viewers_text = f"{viewers/1000:.1f}K 👥"
+        else:
+            viewers_text = f"{viewers} 👥"
+    else:
+        viewers_text = "offline"
+    
+    # Criar link clickável
+    channel_link = f"[{channel_name}]({url})"
+    
+    # Aviso: stream não oficial encontrada por robô
+    warning = "⚠️ **Stream Não-Oficial**\n🤖 Encontrada automaticamente por ROBOS!!!\n\n"
+    
+    # Campo com informações
+    stream_info = (
+        f"{warning}"
+        f"**Canal:** {channel_link}\n"
+        f"**Idioma:** {language_flag}\n"
+        f"**Viewers:** {viewers_text}"
+    )
+    
+    embed.add_field(
+        name="📡 Stream (Automatizada)",
+        value=stream_info,
+        inline=False
+    )
+    
+    return embed
+

@@ -185,6 +185,10 @@ class HLTVBot(commands.Bot):
         # Fechar cliente da API
         await self.api_client.close()
         
+        # Fechar serviço YouTube
+        from src.services.youtube_service import close_youtube_service
+        await close_youtube_service()
+        
         await super().close()
         logger.info("✓ Bot encerrado")
 
