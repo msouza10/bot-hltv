@@ -22,9 +22,15 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s - %(message)s')
 
 
 REQUIRED_COLUMNS = {
-    "is_automated": "BOOLEAN DEFAULT 0",
-    "viewer_count": "INTEGER DEFAULT 0",
-    "title": "TEXT"
+    "match_streams": {
+        "is_automated": "BOOLEAN DEFAULT 0",
+        "viewer_count": "INTEGER DEFAULT 0",
+        "title": "TEXT"
+    },
+    "guild_config": {
+        # Timezone column expected by the bot
+        "timezone": "TEXT DEFAULT 'America/Sao_Paulo'"
+    }
 }
 
 
@@ -60,25 +66,29 @@ async def migrate_libsql(url: str):
     # Conectar com libsql
     client = libsql_client.create_client(url=url, auth_token=os.getenv('LIBSQL_AUTH_TOKEN')) if os.getenv('LIBSQL_AUTH_TOKEN') else libsql_client.create_client(url=url)
 
-    # Obter colunas via PRAGMA (libsql suporta PRAGMA via execute)
-    result = await client.execute("PRAGMA table_info(match_streams);")
-    existing = [row['name'] for row in result.rows]
-
-    to_add = {k: v for k, v in REQUIRED_COLUMNS.items() if k not in existing}
-    if not to_add:
-        logger.info("Nenhuma coluna faltante encontrada em match_streams (libsql).")
-        await client.close()
-        return True
-
-    for col, definition in to_add.items():
-        stmt = f"ALTER TABLE match_streams ADD COLUMN {col} {definition};"
+    # Migrate each table as in SQLite
+    for table, cols in REQUIRED_COLUMNS.items():
         try:
-            await client.execute(stmt)
-            logger.info(f"Coluna adicionada: {col}")
+            result = await client.execute(f"PRAGMA table_info({table});")
+            existing = [row["name"] for row in result.rows]
         except Exception as e:
-            logger.error(f"Falha ao adicionar coluna {col}: {e}")
-            await client.close()
-            return False
+            logger.warning(f"Tabela {table} não existe no DB remoto: {e}")
+            continue
+
+        to_add = {k: v for k, v in cols.items() if k not in existing}
+        if not to_add:
+            logger.info(f"Nenhuma coluna faltante encontrada em {table} (libsql).")
+            continue
+
+        for col, definition in to_add.items():
+            stmt = f"ALTER TABLE {table} ADD COLUMN {col} {definition};"
+            try:
+                await client.execute(stmt)
+                logger.info(f"Coluna adicionada: {table}.{col}")
+            except Exception as e:
+                logger.error(f"Falha ao adicionar coluna {table}.{col}: {e}")
+                await client.close()
+                return False
 
     await client.close()
     logger.info("Migração concluída (libsql)")
@@ -93,27 +103,28 @@ def migrate_sqlite(db_path: str) -> bool:
     backup_local_db(db_path)
 
     conn = sqlite3.connect(db_path)
-    try:
-        existing = get_columns_sqlite(conn, 'match_streams')
-    except Exception as e:
-        logger.error(f"Erro ao obter informações da tabela: {e}")
-        conn.close()
-        return False
-
-    to_add = {k: v for k, v in REQUIRED_COLUMNS.items() if k not in existing}
-    if not to_add:
-        logger.info("Nenhuma coluna faltante encontrada em match_streams (sqlite local).")
-        conn.close()
-        return True
-
-    for col, definition in to_add.items():
+    # migrate each table defined in REQUIRED_COLUMNS
+    tables = list(REQUIRED_COLUMNS.keys())
+    for table in tables:
         try:
-            add_column_sqlite(conn, 'match_streams', col, definition)
-            logger.info(f"Coluna adicionada: {col}")
+            existing = get_columns_sqlite(conn, table)
         except Exception as e:
-            logger.error(f"Falha ao adicionar coluna {col}: {e}")
-            conn.close()
-            return False
+            logger.warning(f"Tabela {table} não existe no DB local: {e}")
+            continue
+
+        to_add = {k: v for k, v in REQUIRED_COLUMNS[table].items() if k not in existing}
+        if not to_add:
+            logger.info(f"Nenhuma coluna faltante encontrada em {table} (sqlite local).")
+            continue
+
+        for col, definition in to_add.items():
+            try:
+                add_column_sqlite(conn, table, col, definition)
+                logger.info(f"Coluna adicionada: {table}.{col}")
+            except Exception as e:
+                logger.error(f"Falha ao adicionar coluna {table}.{col}: {e}")
+                conn.close()
+                return False
 
     conn.close()
     logger.info("Migração concluída (sqlite local)")
@@ -121,14 +132,35 @@ def migrate_sqlite(db_path: str) -> bool:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Migração de colunas em match_streams")
+    parser = argparse.ArgumentParser(description="Migração de colunas em match_streams/guild_config")
     parser.add_argument('--db', default=os.getenv('LIBSQL_URL', 'file:./data/bot.db'), help='DB URL (padrão file:./data/bot.db)')
+    parser.add_argument('--backup', action='store_true', help='Criar backup do DB local antes da alteração (somente file:)')
+    parser.add_argument('--dry-run', action='store_true', help='Não aplica mudanças; apenas lista colunas faltantes')
     args = parser.parse_args()
 
     db_url = args.db
     if db_url.startswith('file:'):
         db_path = db_url.replace('file:', '')
         logger.info(f"DB local detectado: {db_path}")
+        if args.dry_run:
+            # only list missing columns
+            missing = False
+            conn = sqlite3.connect(db_path)
+            for table, cols in REQUIRED_COLUMNS.items():
+                try:
+                    existing = get_columns_sqlite(conn, table)
+                except Exception as e:
+                    logger.warning(f"Tabela {table} não existe no DB local: {e}")
+                    continue
+                for col in cols.keys():
+                    if col not in existing:
+                        logger.info(f"Falta coluna: {table}.{col}")
+                        missing = True
+            conn.close()
+            if not missing:
+                logger.info("Nenhuma coluna faltante encontrada em DB local.")
+            return
+
         ok = migrate_sqlite(db_path)
         if ok:
             logger.info('Migração finalizada com sucesso.')
@@ -138,6 +170,28 @@ def main():
         # libsql URL
         import asyncio
         logger.info(f"DB remoto detectado: {db_url}")
+        if args.dry_run:
+            async def dry_check():
+                try:
+                    import libsql_client
+                except Exception:
+                    logger.error("libsql_client não disponível; instale as dependências no ambiente remoto.")
+                    return
+                client = libsql_client.create_client(url=db_url, auth_token=os.getenv('LIBSQL_AUTH_TOKEN')) if os.getenv('LIBSQL_AUTH_TOKEN') else libsql_client.create_client(url=db_url)
+                for table, cols in REQUIRED_COLUMNS.items():
+                    try:
+                        result = await client.execute(f"PRAGMA table_info({table});")
+                        existing = [row['name'] for row in result.rows]
+                    except Exception as e:
+                        logger.warning(f"Tabela {table} não existe no DB remoto: {e}")
+                        continue
+                    for col in cols.keys():
+                        if col not in existing:
+                            logger.info(f"Falta coluna remota: {table}.{col}")
+                await client.close()
+            asyncio.run(dry_check())
+            return
+
         ok = asyncio.run(migrate_libsql(db_url))
         if ok:
             logger.info('Migração finalizada com sucesso (libsql).')
@@ -147,89 +201,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-#!/usr/bin/env python3
-"""
-Migration: Ensure `match_streams` table has `is_automated`, `viewer_count`, `title` columns.
-Usage (safe):
-  ./venv/bin/python scripts/migrate_add_match_streams_columns.py --db file:./data/bot.db --backup
-
-This will:
-- Backup the DB file to data/bot.db.bak (only for file: local path)
-- Connect via libsql_client and check PRAGMA table_info(match_streams)
-- Add missing columns via `ALTER TABLE` if necessary
-- Print actions
-"""
-
-import argparse
-import shutil
-import sys
-from pathlib import Path
-
-import libsql_client
-
-
-MIGRATIONS = [
-    ("is_automated", "BOOLEAN", "DEFAULT 0"),
-    ("viewer_count", "INTEGER", "DEFAULT 0"),
-    ("title", "TEXT", "")
-]
-
-
-def parse_args():
-    p = argparse.ArgumentParser(description="Migrate match_streams columns")
-    p.add_argument("--db", default="file:./data/bot.db", help="libsql url or file: local path")
-    p.add_argument("--backup", action="store_true", help="Backup local DB file before migration (if file:) ")
-    return p.parse_args()
-
-
-async def run_migration(db_url: str, backup: bool):
-    # If file local, optionally backup
-    if db_url.startswith("file:") and backup:
-        db_path = db_url.replace("file:", "")
-        db_file = Path(db_path)
-        if db_file.exists():
-            backup_path = db_file.with_suffix(db_file.suffix + ".bak")
-            print(f"Backing up local DB: {db_file} -> {backup_path}")
-            shutil.copyfile(db_file, backup_path)
-        else:
-            print("Local DB file not found; continuing without backup")
-
-    client = libsql_client.create_client(url=db_url)
-
-    # Get existing columns
-    result = await client.execute("PRAGMA table_info(match_streams)")
-    existing_cols = [row[1] for row in result.rows]  # row format: (cid, name, type, notnull, dflt_value, pk)
-    print("Existing columns:", existing_cols)
-
-    # For each migration column, add if missing
-    added_any = False
-    for name, col_type, default_clause in MIGRATIONS:
-        if name in existing_cols:
-            print(f"Column '{name}' already exists; skipping")
-            continue
-        statement = f"ALTER TABLE match_streams ADD COLUMN {name} {col_type} {default_clause}".strip()
-        print(f"Adding column with: {statement}")
-        try:
-            await client.execute(statement)
-            print(f"  ✓ Column '{name}' added")
-            added_any = True
-        except Exception as e:
-            print(f"  ✗ Failed to add column '{name}': {e}")
-
-    if not added_any:
-        print("No columns required adding.")
-
-    await client.close()
-
-
-if __name__ == "__main__":
-    args = parse_args()
-    import asyncio
-
-    try:
-        asyncio.run(run_migration(args.db, args.backup))
-    except Exception as e:
-        print("Migration failed:", e)
-        sys.exit(1)
-
-    print("Migration finished.")
